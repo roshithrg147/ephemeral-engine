@@ -177,3 +177,8 @@ assistant_generated.png
 
 # uv package manager config
 .uv/
+
+# Exclude documentation / demo files from repo
+PROJECTINSIGHT.md
+dp_fibonacci.py
+summary-notes-skill-gitrepo.md
