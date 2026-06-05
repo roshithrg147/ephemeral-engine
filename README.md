@@ -16,33 +16,31 @@ By shifting from standard, linear append-only chat wrappers to a **State-Cached 
 The framework operates as an asynchronous pipeline that isolates session memories, reformulates ambiguous user intents, and dynamically pulls relevant context using advanced vector clustering statistics.
 
 ```
-   [User Prompt]
-         │
-         ▼
-┌──────────────────────────┐
-│   Async Query Rewriter   │ ───► Resolves context & pronouns via Gemini 2.5 Flash
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│  Transient Vector DB     │ ───► In-Memory ChromaDB (Ephemeral, isolated per session)
-│ (Dynamic Top-K Gating)   │ ───► Prunes noise via Statistical Variance Delta Analysis
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐      ┌───────────────────────────────┐
-│ Memory Queue Interceptor │ ◄─── │ Volatile Write Buffer Queue   │
-└────────────┬─────────────┘      └───────────────────────────────┘
-             │                     (Captures fast-typing threads before VDB commit)
-             ▼
-┌──────────────────────────┐
-│ Grounded Stream Reasoner │ ───► Token Streaming via Gemini 2.5 Pro Async Client
-└──────────────────────────┘
+                  ┌──────────────────────────┐
+                  │       User Prompt        │
+                  └────────────┬─────────────┘
+                               │
+                               ▼
+                  ┌──────────────────────────┐
+                  │ Async Intent Realigner   │ ───► Dual-Purpose JSON payload output
+                  └────────────┬─────────────┘      (Search query + Grounded Prompt)
+                               │
+                ┌──────────────┴──────────────┐
+                ▼                             ▼
+   ┌──────────────────────────┐  ┌──────────────────────────┐
+   │    Transient ChromaDB    │  │ Grounded Stream Reasoner │
+   │ (Dual-Anchor Protection) │  │  (Secure XML Enclosures) │
+   └──────────────────────────┘  └──────────────────────────┘
 ```
 
 ### Key Engineering Features
 * **Token Flattening Layer:** Pins long-turn conversation payloads to a predictable budget by avoiding forcing the primary model to re-read thousands of lines of redundant history.
-* **Dynamic Top-K Fallback Gating:** Replaces fragile static cosine thresholds with an aggressive distance variance calculator ($\Delta \le 0.15$). It automatically groups relevant topics together while mathematically excluding contextual drift (e.g., completely ignoring tangential queries).
+* **Dual-Anchor Protection Gating Engine:** Prunes matching memories between `0.41` and `0.48` cosine distance against both the immediately accepted neighbor ($\Delta \le 0.12$) and the absolute closest top anchor match ($\Delta \le 0.18$). This completely neutralizes the threat vector where an irrelevant topic (like coffee) creeps into the session context by hitchhiking next to an adjacent cluster.
+* **Dual-Purpose Intent Realignment:** The Async Query Reformulator outputs a structured JSON schema:
+  1. `search_vector_query`: A dense, keyword-heavy search query optimized strictly for vector database similarity matches.
+  2. `grounded_llm_prompt`: An expanded, fully explicit version of the prompt resolving all pronouns and fragmented context links. This ensures both vector search and primary reasoner are aligned.
+* **Persistent Global Connection Singleton:** Lazy-initializes a thread-safe, module-level Google GenAI client (`_GENAI_CLIENT`), reusing it for query reformulations, embeddings, and token streaming to eliminate Google Auth credential validation handshake latencies.
+* **XML-Tagged Enclosure Prompt Segregation:** Segregates retrieved contexts and pending memories inside explicit `<retrieved_memory>` XML tags. The system prompt instructs the reasoner to treat these contents strictly as untrusted data references, ensuring that instructions or overrides embedded in history cannot affect model behavior.
 * **Volatile Memory Interceptor Proxy:** A thread-safe, locked buffer (`pending_commit_buffer`) that acts as a real-time cache. If an embedding worker thread is mid-flight over the network during high-speed typing, the downstream reasoner intercepts the raw string to guarantee complete contextual ingestion.
 * **Hard Session Isolation:** Built for strict B2B compliance. Caches and memory frames exist strictly in serverless, transient in-memory spaces, completely wiped down to physical disk layers upon termination (`/burn` or `exit`).
 
@@ -75,6 +73,12 @@ The framework operates as an asynchronous pipeline that isolates session memorie
    uv run python src/sc_evm.py
    ```
 
+### Running Automated Integration Tests
+Verify the entire pipeline including connection diagnostics, dual-anchor gating boundaries, JSON query reformulation, and turn execution:
+```bash
+uv run python src/sc_evm.py --test
+```
+
 ---
 
 ## 🛠️ Interactive Session Commands
@@ -83,31 +87,6 @@ Inside the execution loop, the interactive CLI exposes structural runtime action
 
 * `/burn` : Forces an instantaneous clear of the volatile buffer queue, wipes out the active in-memory ChromaDB collection, and flushes dialogue histories.
 * `exit` : Executes a safe, graceful termination sequence, triggers a full memory burn, and securely disconnects network socket channels.
-
----
-
-## 📦 SDK & Middleware Integration (Roadmap)
-
-To easily drop the SC-EVM execution flow straight into any cloud-native pipeline or enterprise microservice framework (e.g., FastAPI), wrap the core pipeline as a modular client proxy class:
-
-```python
-import asyncio
-from sc_evm import EphemeralMemoryProxy
-
-async def main():
-    # Instantiates transient collections, configures thread-safe locks, and binds Vertex AI channels
-    proxy = EphemeralMemoryProxy()
-    
-    user_prompt = "Update our system architecture to utilize Kafka partitions."
-    
-    print("Assistant: ", end="")
-    # Asynchronously reformulates intents, screens memories, and streams raw token chunks
-    async for token in proxy.chat_stream(session_id="session_01j8", prompt=user_prompt):
-        print(token, end="", flush=True)
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
 
 ---
 
