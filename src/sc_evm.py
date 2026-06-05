@@ -153,6 +153,7 @@ async def search_memory_async(query: str, limit: int = 3) -> list[str]:
             )
             
         matched_docs = []
+        matched_dists = []
         if results and "documents" in results and results["documents"] and len(results["documents"]) > 0:
             docs = results["documents"][0]
             distances = results["distances"][0] if "distances" in results else [0.0] * len(docs)
@@ -165,30 +166,36 @@ async def search_memory_async(query: str, limit: int = 3) -> list[str]:
                     print(f"[SearchMemory] Statistical confidence floor exceeded (closest match dist {top_dist:.4f} > 0.48). Triggering zero-context parametric fallback.")
                     return []
                 
-                # Rule 1: Top match is automatically included since dist <= 0.48
-                matched_docs.append(docs[0])
-                print(f"[SearchMemory] Selected top match: '{docs[0][:50]}...' (dist = {top_dist:.4f})")
-                
-                # Rule 1 (cont): Evaluate subsequent candidates if top match distance is <= 0.35
-                if top_dist <= 0.35:
-                    print(f"[SearchMemory] Top match distance {top_dist:.4f} <= 0.35. Evaluating subsequent candidates...")
-                    for doc, dist in zip(docs[1:], distances[1:]):
-                        delta = dist - top_dist
-                        print(f"[SearchMemory] Candidate Match: '{doc[:40]}...' (dist = {dist:.4f}, delta = {delta:.4f})")
-                        
-                        # Rule 2: Dynamic Gap Check (delta > 0.15) & absolute threshold check
-                        if delta > 0.15:
-                            print(f"[SearchMemory] Excluded: delta {delta:.4f} > 0.15 from closest match.")
-                            continue
-                        if dist > 0.48:
-                            print(f"[SearchMemory] Excluded: absolute distance {dist:.4f} exceeds safety threshold of 0.48.")
-                            continue
-                        
-                        matched_docs.append(doc)
-                        print(f"[SearchMemory] Dynamic Top-K Match Selected: '{doc[:50]}...' (dist = {dist:.4f})")
-                else:
-                    print(f"[SearchMemory] Top match distance {top_dist:.4f} > 0.35. Skipping evaluation of subsequent candidates.")
+                for doc, dist in zip(docs, distances):
+                    print(f"[SearchMemory] Evaluating candidate: '{doc[:45]}...' (dist = {dist:.4f})")
                     
+                    # Rule 3: Hard Ceiling
+                    if dist > 0.48:
+                        print(f"[SearchMemory] Excluded: Absolute distance {dist:.4f} > 0.48 hard ceiling.")
+                        continue
+                        
+                    # Rule 1: Absolute Confidence Floor
+                    if dist <= 0.40:
+                        matched_docs.append(doc)
+                        matched_dists.append(dist)
+                        print(f"[SearchMemory] Accepted (Rule 1: absolute distance {dist:.4f} <= 0.40).")
+                        continue
+                        
+                    # Rule 2: Relative Delta Extension (sitting between 0.41 and 0.48)
+                    if matched_dists:
+                        prev_accepted_dist = matched_dists[-1]
+                        neighboring_delta = dist - prev_accepted_dist
+                        if neighboring_delta <= 0.12:
+                            matched_docs.append(doc)
+                            matched_dists.append(dist)
+                            print(f"[SearchMemory] Accepted (Rule 2: neighboring delta {neighboring_delta:.4f} <= 0.12 from preceding accepted dist {prev_accepted_dist:.4f}).")
+                        else:
+                            print(f"[SearchMemory] Excluded: neighboring delta {neighboring_delta:.4f} > 0.12.")
+                    else:
+                        matched_docs.append(doc)
+                        matched_dists.append(dist)
+                        print(f"[SearchMemory] Accepted top match candidate (dist = {dist:.4f}).")
+                        
         return matched_docs
     except Exception as e:
         print(f"[SearchMemory] Error performing vector search: {e}", file=sys.stderr)
