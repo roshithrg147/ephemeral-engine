@@ -8,8 +8,6 @@ import argparse
 import google.auth
 from google import genai
 from google.genai import types
-import anthropic
-from anthropic import AsyncAnthropicVertex
 import chromadb
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 from rich.console import Console
@@ -37,7 +35,7 @@ collection = chroma_client.get_or_create_collection(
 print("ChromaDB 'research_session_memory' collection created successfully.")
 
 # ==========================================
-# 3. Dedicated Client Factory (Fixed Regions)
+# 3. Dedicated Client Factory
 # ==========================================
 def get_genai_client():
     """Initializes standard Google GenAI Client using regional env settings."""
@@ -46,13 +44,6 @@ def get_genai_client():
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
     location = os.getenv("VERTEX_GEMINI_LOCATION", "us-central1")
     return genai.Client(vertexai=True, location=location, project=project_id)
-
-def get_async_anthropic_client():
-    """FIXED: Routes Claude to us-east1 to eliminate the us-east5 404 crash."""
-    credentials, project_id = google.auth.default()
-    if not project_id:
-        project_id = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
-    return AsyncAnthropicVertex(region="us-east1", project_id=project_id)
 
 # ==========================================
 # Connection Diagnostics & Auth Setup
@@ -146,7 +137,10 @@ async def get_embedding_async(text: str) -> list[float]:
     return response.embeddings[0].values
 
 async def search_memory_async(query: str, limit: int = 3) -> list[str]:
-    """FIXED: Tightened cosine threshold from 0.60 to 0.40 to prevent semantic drift leakage."""
+    """
+    Queries ChromaDB with a Dynamic Top-K Fallback Ranking algorithm.
+    Prunes matches dynamically based on distance gap thresholding to prevent context drift.
+    """
     print(f"[SearchMemory] Querying semantic memory for: '{query}'...")
     try:
         query_vector = await get_embedding_async(query)
@@ -163,12 +157,38 @@ async def search_memory_async(query: str, limit: int = 3) -> list[str]:
             docs = results["documents"][0]
             distances = results["distances"][0] if "distances" in results else [0.0] * len(docs)
             
-            for doc, dist in zip(docs, distances):
-                print(f"[SearchMemory] Match candidate metadata: distance = {dist:.4f}")
-                if dist <= 0.40:  # Clamped to 0.40 max distance boundary
-                    matched_docs.append(doc)
+            if len(docs) > 0:
+                top_dist = distances[0]
+                
+                # Rule 3: Absolute Exclusion Threshold Check
+                if top_dist > 0.48:
+                    print(f"[SearchMemory] Statistical confidence floor exceeded (closest match dist {top_dist:.4f} > 0.48). Triggering zero-context parametric fallback.")
+                    return []
+                
+                # Rule 1: Top match is automatically included since dist <= 0.48
+                matched_docs.append(docs[0])
+                print(f"[SearchMemory] Selected top match: '{docs[0][:50]}...' (dist = {top_dist:.4f})")
+                
+                # Rule 1 (cont): Evaluate subsequent candidates if top match distance is <= 0.35
+                if top_dist <= 0.35:
+                    print(f"[SearchMemory] Top match distance {top_dist:.4f} <= 0.35. Evaluating subsequent candidates...")
+                    for doc, dist in zip(docs[1:], distances[1:]):
+                        delta = dist - top_dist
+                        print(f"[SearchMemory] Candidate Match: '{doc[:40]}...' (dist = {dist:.4f}, delta = {delta:.4f})")
+                        
+                        # Rule 2: Dynamic Gap Check (delta > 0.15) & absolute threshold check
+                        if delta > 0.15:
+                            print(f"[SearchMemory] Excluded: delta {delta:.4f} > 0.15 from closest match.")
+                            continue
+                        if dist > 0.48:
+                            print(f"[SearchMemory] Excluded: absolute distance {dist:.4f} exceeds safety threshold of 0.48.")
+                            continue
+                        
+                        matched_docs.append(doc)
+                        print(f"[SearchMemory] Dynamic Top-K Match Selected: '{doc[:50]}...' (dist = {dist:.4f})")
                 else:
-                    print(f"[SearchMemory] Excluded: Cosine distance {dist:.4f} exceeds threshold of 0.40")
+                    print(f"[SearchMemory] Top match distance {top_dist:.4f} > 0.35. Skipping evaluation of subsequent candidates.")
+                    
         return matched_docs
     except Exception as e:
         print(f"[SearchMemory] Error performing vector search: {e}", file=sys.stderr)
@@ -182,10 +202,13 @@ You must answer the user's query using the provided conversation history and ret
 Be direct, helpful, and technically precise.
 """
 
+PRIMARY_MODEL_ID = "publishers/google/models/gemini-2.5-pro"
+FALLBACK_MODEL_ID = "publishers/google/models/gemini-2.5-flash"
+
 async def stream_grounded_response(user_input: str, retrieved_context: list[str], console: Console) -> str:
     """
     Streams the response token-by-token directly to the terminal UI.
-    First attempts asynchronous streaming with Claude Opus, then falls back to Gemini 2.5 Pro.
+    First attempts asynchronous streaming with Gemini 2.5 Pro, then falls back to Gemini 2.5 Flash.
     """
     # 1. Volatile In-Memory Buffer Interceptor
     with buffer_lock:
@@ -209,34 +232,38 @@ async def stream_grounded_response(user_input: str, retrieved_context: list[str]
     full_response_text = ""
     first_token = True
 
-    # Try Primary Claude Opus Model over Network Socket
+    # Try Primary Gemini 2.5 Pro model via client.aio
     try:
-        print("[Model-2] Initializing async streaming pipe for primary model Claude Opus...")
-        anthropic_client = get_async_anthropic_client()
+        print(f"[Model-2] Initializing async streaming pipe for primary model {PRIMARY_MODEL_ID}...")
+        genai_client = get_genai_client()
         
-        async with anthropic_client.messages.stream(
-            model="claude-3-opus@20240229",
-            max_tokens=2048,
-            system=GROUNDED_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}]
-        ) as stream:
-            async for text_chunk in stream.text_stream:
+        response_stream = await genai_client.aio.models.generate_content_stream(
+            model=PRIMARY_MODEL_ID,
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=GROUNDED_SYSTEM_PROMPT,
+                temperature=0.7,
+            )
+        )
+        
+        async for chunk in response_stream:
+            if chunk.text:
                 if first_token:
                     console.print("\n[bold green]Assistant:[/bold green] ", end="")
                     first_token = False
-                print(text_chunk, end="", flush=True)
-                full_response_text += text_chunk
-        
-        print("\n[Model-2] Claude Opus async execution: SUCCESSFUL.")
+                print(chunk.text, end="", flush=True)
+                full_response_text += chunk.text
+                
+        print(f"\n[Model-2] Primary model {PRIMARY_MODEL_ID} async execution: SUCCESSFUL.")
         return full_response_text
 
     except Exception as e:
-        print(f"[Model-2] Claude Opus stream failure ({e}). Routing to Gemini Pro backup chain...")
+        print(f"[Model-2] Primary model stream failure ({e}). Routing to Gemini Flash backup chain...")
         full_response_text = ""
         try:
             genai_client = get_genai_client()
             response_stream = await genai_client.aio.models.generate_content_stream(
-                model="publishers/google/models/gemini-2.5-pro",
+                model=FALLBACK_MODEL_ID,
                 contents=user_prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=GROUNDED_SYSTEM_PROMPT,
@@ -253,7 +280,7 @@ async def stream_grounded_response(user_input: str, retrieved_context: list[str]
                     print(chunk.text, end="", flush=True)
                     full_response_text += chunk.text
             
-            print("\n[Model-2] Gemini Pro backup stream execution: SUCCESSFUL.")
+            print(f"\n[Model-2] Fallback model {FALLBACK_MODEL_ID} stream execution: SUCCESSFUL.")
             return full_response_text
         except Exception as e2:
             print(f"\n[Model-2] Critical: Model fallback exhaust. Details: {e2}", file=sys.stderr)
