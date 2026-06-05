@@ -336,6 +336,7 @@ def purge_memory():
 # 8. Interactive CLI & Orchestration Loop
 # ==========================================
 def run_cli_loop():
+    global conversation_history_verbatim
     console = Console()
     console.print("\n[bold cyan]======================================================[/bold cyan]")
     console.print("[bold green]🚀 Welcome to Ephemeral Engine: SC-EVM CLI[/bold green]")
@@ -378,8 +379,8 @@ def run_cli_loop():
                 conversation_history_verbatim.append({"role": "user", "content": user_input})
                 conversation_history_verbatim.append({"role": "assistant", "content": response})
                 # Keep sliding window to last 3 turns (6 messages)
-                if len(conversation_history_verbatim) > 6:
-                    conversation_history_verbatim = conversation_history_verbatim[-6:]
+                while len(conversation_history_verbatim) > 6:
+                    conversation_history_verbatim.pop(0)
             
             # Step 5: Queue background indexing for future turns
             index_chunk = f"User: {user_input}\nAssistant: {response}"
