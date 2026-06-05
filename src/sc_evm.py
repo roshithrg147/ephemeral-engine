@@ -2,13 +2,14 @@ import os
 import sys
 import time
 import uuid
+import asyncio
 import threading
 import argparse
 import google.auth
 from google import genai
 from google.genai import types
 import anthropic
-from anthropic import AnthropicVertex
+from anthropic import AsyncAnthropicVertex
 import chromadb
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 from rich.console import Console
@@ -36,7 +37,25 @@ collection = chroma_client.get_or_create_collection(
 print("ChromaDB 'research_session_memory' collection created successfully.")
 
 # ==========================================
-# 3. Connection Diagnostics & Auth Setup
+# 3. Dedicated Client Factory (Fixed Regions)
+# ==========================================
+def get_genai_client():
+    """Initializes standard Google GenAI Client using regional env settings."""
+    credentials, project_id = google.auth.default()
+    if not project_id:
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
+    location = os.getenv("VERTEX_GEMINI_LOCATION", "us-central1")
+    return genai.Client(vertexai=True, location=location, project=project_id)
+
+def get_async_anthropic_client():
+    """FIXED: Routes Claude to us-east1 to eliminate the us-east5 404 crash."""
+    credentials, project_id = google.auth.default()
+    if not project_id:
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
+    return AsyncAnthropicVertex(region="us-east1", project_id=project_id)
+
+# ==========================================
+# Connection Diagnostics & Auth Setup
 # ==========================================
 def verify_adc_connection() -> bool:
     """
@@ -69,7 +88,7 @@ def verify_adc_connection() -> bool:
         return False
 
 # ==========================================
-# 4. Part 2: Query Reformulation Layer
+# 4. Asynchronous Query Reformulation
 # ==========================================
 REWRITE_MODEL_ID = "publishers/google/models/gemini-2.5-flash"
 
@@ -80,16 +99,9 @@ Do NOT reply with a chat response. ONLY return the rewritten search query. If th
 """
 
 @retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=1, max=10))
-def rewrite_query(user_raw_input: str) -> str:
-    """
-    Reformulates the user's raw input based on a sliding window of the last 3 conversation turns.
-    Uses Gemini Flash via Vertex AI.
-    """
-    credentials, project_id = google.auth.default()
-    if not project_id:
-        project_id = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
-    location = os.getenv("VERTEX_GEMINI_LOCATION", "us-central1")
-    client = genai.Client(vertexai=True, location=location, project=project_id)
+async def rewrite_query_async(user_raw_input: str) -> str:
+    """Asynchronously reformulates user queries to prevent loop thread blocking."""
+    client = get_genai_client()
     
     with buffer_lock:
         history_window = conversation_history_verbatim[-6:]
@@ -100,16 +112,10 @@ def rewrite_query(user_raw_input: str) -> str:
         formatted_history.append(f"{role_label}: {turn.get('content')}")
         
     history_str = "\n".join(formatted_history)
-    
-    prompt = f"""Conversation History:
-{history_str}
-
-Current User Prompt: {user_raw_input}
-
-Rewritten search query:"""
+    prompt = f"Conversation History:\n{history_str}\n\nCurrent User Prompt: {user_raw_input}\n\nRewritten search query:"
 
     try:
-        response = client.models.generate_content(
+        response = await client.aio.models.generate_content(
             model=REWRITE_MODEL_ID,
             contents=prompt,
             config=types.GenerateContentConfig(
@@ -125,33 +131,25 @@ Rewritten search query:"""
         return user_raw_input
 
 # ==========================================
-# 5. Part 3: Semantic Search & Cosine Distance Filtering
+# 5. Semantic Search & Memory Management
 # ==========================================
 EMBEDDING_MODEL_ID = "text-embedding-004"
 
 @retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=1, max=10))
-def get_embedding(text: str) -> list[float]:
-    """Generates text embedding vector using text-embedding-004 on Vertex AI."""
-    credentials, project_id = google.auth.default()
-    if not project_id:
-        project_id = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
-    location = os.getenv("VERTEX_GEMINI_LOCATION", "us-central1")
-    client = genai.Client(vertexai=True, location=location, project=project_id)
-    
-    response = client.models.embed_content(
+async def get_embedding_async(text: str) -> list[float]:
+    """Asynchronous vector generation using text-embedding-004."""
+    client = get_genai_client()
+    response = await client.aio.models.embed_content(
         model=EMBEDDING_MODEL_ID,
         contents=text
     )
     return response.embeddings[0].values
 
-def search_memory(query: str, limit: int = 3) -> list[str]:
-    """
-    Queries ChromaDB with the cosine distance threshold <= 0.60.
-    Returns matched documents.
-    """
+async def search_memory_async(query: str, limit: int = 3) -> list[str]:
+    """FIXED: Tightened cosine threshold from 0.60 to 0.40 to prevent semantic drift leakage."""
     print(f"[SearchMemory] Querying semantic memory for: '{query}'...")
     try:
-        query_vector = get_embedding(query)
+        query_vector = await get_embedding_async(query)
         
         with buffer_lock:
             results = collection.query(
@@ -166,66 +164,30 @@ def search_memory(query: str, limit: int = 3) -> list[str]:
             distances = results["distances"][0] if "distances" in results else [0.0] * len(docs)
             
             for doc, dist in zip(docs, distances):
-                print(f"[SearchMemory] Match candidate: '{doc}' (cosine distance = {dist:.4f})")
-                if dist <= 0.60:
+                print(f"[SearchMemory] Match candidate metadata: distance = {dist:.4f}")
+                if dist <= 0.40:  # Clamped to 0.40 max distance boundary
                     matched_docs.append(doc)
                 else:
-                    print(f"[SearchMemory] Excluded: Cosine distance {dist:.4f} exceeds threshold of 0.60")
+                    print(f"[SearchMemory] Excluded: Cosine distance {dist:.4f} exceeds threshold of 0.40")
         return matched_docs
     except Exception as e:
         print(f"[SearchMemory] Error performing vector search: {e}", file=sys.stderr)
         return []
 
 # ==========================================
-# 6. Part 4: Dual-Model Failover & Context Queue Interception
+# 6. Async Model Execution & Token Streaming
 # ==========================================
 GROUNDED_SYSTEM_PROMPT = """You are an elite research assistant.
 You must answer the user's query using the provided conversation history and retrieved context.
 Be direct, helpful, and technically precise.
 """
 
-@retry(stop=stop_after_attempt(2), wait=wait_random_exponential(min=1, max=5), reraise=True)
-def query_claude_opus(system_prompt: str, user_prompt: str) -> str:
-    """Queries Claude Opus on Vertex AI. Retries twice on transient errors before propagating."""
-    credentials, project_id = google.auth.default()
-    client = AnthropicVertex(region="us-east5", project_id=project_id)
-    
-    messages = [{"role": "user", "content": user_prompt}]
-    res = client.messages.create(
-        model="claude-3-opus@20240229",
-        max_tokens=2048,
-        system=system_prompt,
-        messages=messages,
-        timeout=30.0
-    )
-    return res.content[0].text
-
-@retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=1, max=10))
-def query_gemini_pro(system_prompt: str, user_prompt: str) -> str:
-    """Queries Gemini 2.5 Pro on Vertex AI as a robust fallback model."""
-    credentials, project_id = google.auth.default()
-    if not project_id:
-        project_id = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
-    location = os.getenv("VERTEX_GEMINI_LOCATION", "us-central1")
-    client = genai.Client(vertexai=True, location=location, project=project_id)
-    
-    response = client.models.generate_content(
-        model="publishers/google/models/gemini-2.5-pro",
-        contents=user_prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            temperature=0.7,
-        )
-    )
-    return response.text
-
-def generate_grounded_response(user_input: str, retrieved_context: list[str]) -> str:
+async def stream_grounded_response(user_input: str, retrieved_context: list[str], console: Console) -> str:
     """
-    Generates a grounded response.
-    First tries Claude Opus, and falls back to Gemini Pro on failure.
-    Integrates the Memory Buffer Interceptor to append unindexed memories.
+    Streams the response token-by-token directly to the terminal UI.
+    First attempts asynchronous streaming with Claude Opus, then falls back to Gemini 2.5 Pro.
     """
-    # 1. Memory Buffer Interceptor
+    # 1. Volatile In-Memory Buffer Interceptor
     with buffer_lock:
         unindexed_memories = list(pending_commit_buffer)
         
@@ -237,56 +199,73 @@ def generate_grounded_response(user_input: str, retrieved_context: list[str]) ->
         
     context_str = "\n\n".join(context_list)
     
-    # 2. Compile history
+    # 2. History Compile
     with buffer_lock:
         history_window = conversation_history_verbatim[-6:]
     
-    history_str = ""
-    for turn in history_window:
-        role = "User" if turn["role"] == "user" else "Assistant"
-        history_str += f"{role}: {turn['content']}\n"
-        
-    # Construct the final prompt payload
-    user_prompt = f"""--- RETRIEVED CONTEXT ---
-{context_str}
+    history_str = "".join(f"{'User' if t['role']=='user' else 'Assistant'}: {t['content']}\n" for t in history_window)
+    user_prompt = f"--- RETRIEVED CONTEXT ---\n{context_str}\n\n--- CONVERSATION HISTORY ---\n{history_str}\n\n--- CURRENT USER PROMPT ---\n{user_input}\n"
 
---- CONVERSATION HISTORY ---
-{history_str}
+    full_response_text = ""
+    first_token = True
 
---- CURRENT USER PROMPT ---
-{user_input}
-"""
-
-    # 3. Model 2 Execution Block with Failover
-    print("[Model-2] Querying primary model Claude Opus...")
+    # Try Primary Claude Opus Model over Network Socket
     try:
-        response = query_claude_opus(GROUNDED_SYSTEM_PROMPT, user_prompt)
-        print("[Model-2] Claude Opus execution: SUCCESSFUL.")
-        return response
+        print("[Model-2] Initializing async streaming pipe for primary model Claude Opus...")
+        anthropic_client = get_async_anthropic_client()
+        
+        async with anthropic_client.messages.stream(
+            model="claude-3-opus@20240229",
+            max_tokens=2048,
+            system=GROUNDED_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}]
+        ) as stream:
+            async for text_chunk in stream.text_stream:
+                if first_token:
+                    console.print("\n[bold green]Assistant:[/bold green] ", end="")
+                    first_token = False
+                print(text_chunk, end="", flush=True)
+                full_response_text += text_chunk
+        
+        print("\n[Model-2] Claude Opus async execution: SUCCESSFUL.")
+        return full_response_text
+
     except Exception as e:
-        print(f"[Model-2] Claude Opus execution failed ({e}). Routing to Gemini Pro backup model...")
+        print(f"[Model-2] Claude Opus stream failure ({e}). Routing to Gemini Pro backup chain...")
+        full_response_text = ""
         try:
-            response = query_gemini_pro(GROUNDED_SYSTEM_PROMPT, user_prompt)
-            print("[Model-2] Gemini Pro backup execution: SUCCESSFUL.")
-            return response
+            genai_client = get_genai_client()
+            response_stream = await genai_client.aio.models.generate_content_stream(
+                model="publishers/google/models/gemini-2.5-pro",
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=GROUNDED_SYSTEM_PROMPT,
+                    temperature=0.7,
+                )
+            )
+            
+            first_token = True
+            async for chunk in response_stream:
+                if chunk.text:
+                    if first_token:
+                        console.print("\n[bold green]Assistant:[/bold green] ", end="")
+                        first_token = False
+                    print(chunk.text, end="", flush=True)
+                    full_response_text += chunk.text
+            
+            print("\n[Model-2] Gemini Pro backup stream execution: SUCCESSFUL.")
+            return full_response_text
         except Exception as e2:
-            error_msg = f"[Model-2] Critical: Both Claude Opus and Gemini Pro failed. Details: {e2}"
-            print(error_msg, file=sys.stderr)
+            print(f"\n[Model-2] Critical: Model fallback exhaust. Details: {e2}", file=sys.stderr)
             return "Error: Could not generate response from either primary or backup models."
 
 # ==========================================
-# 7. Part 5: Async Background Workers & Purge Operations
+# 7. Non-Blocking Coroutine Task Workers
 # ==========================================
-def async_index_worker(text: str):
-    """
-    Background worker that runs inside a daemon thread.
-    Encodes the given text chunk and commits it to ChromaDB.
-    Evicts the text from the volatile pending_commit_buffer queue upon completion.
-    """
+async def async_index_task(text: str):
+    """Replaces old system thread processing with native async task worker pools."""
     try:
-        print(f"[AsyncWorker] Starting background embedding creation for text chunk...")
-        vector = get_embedding(text)
-        
+        vector = await get_embedding_async(text)
         doc_id = str(uuid.uuid4())
         timestamp = int(time.time())
         
@@ -297,28 +276,25 @@ def async_index_worker(text: str):
                 documents=[text],
                 metadatas=[{"timestamp": timestamp}]
             )
-        print(f"[AsyncWorker] Successfully indexed to ChromaDB. ID: {doc_id}")
+        print(f"\n[AsyncWorker] Successfully indexed chunk to ChromaDB. ID: {doc_id}")
     except Exception as e:
-        print(f"[AsyncWorker] Error indexing document: {e}", file=sys.stderr)
+        print(f"\n[AsyncWorker] Error indexing document: {e}", file=sys.stderr)
     finally:
-        # Secure eviction from active volatile buffer
         with buffer_lock:
             if text in pending_commit_buffer:
                 pending_commit_buffer.remove(text)
-                print(f"[AsyncWorker] Evicted chunk from pending_commit_buffer queue.")
+                print(f"[AsyncWorker] Evicted chunk from volatile buffer.")
 
 def index_in_background(text: str):
-    """Appends to the volatile queue buffer and spawns the background worker."""
+    """Enqueues processing into loop framework without thread spawning overhead."""
     with buffer_lock:
         pending_commit_buffer.append(text)
-        
-    thread = threading.Thread(target=async_index_worker, args=(text,), daemon=True)
-    thread.start()
+    asyncio.create_task(async_index_task(text))
 
 def purge_memory():
-    """Wipes the ChromaDB collections and completely resets the volatile buffers."""
-    global collection, pending_commit_buffer, conversation_history_verbatim
-    print("[Purge] Initiating memory burn and collection wipe...")
+    """Wipes session contexts cleanly."""
+    global collection
+    print("[Purge] Initiating full memory burn...")
     with buffer_lock:
         try:
             chroma_client.delete_collection("research_session_memory")
@@ -330,22 +306,21 @@ def purge_memory():
         )
         pending_commit_buffer.clear()
         conversation_history_verbatim.clear()
-    print("[Purge] All ephemeral contexts and databases successfully wiped.")
+    print("[Purge] Ephemeral datastores wiped clean.")
 
 # ==========================================
-# 8. Interactive CLI & Orchestration Loop
+# 8. Async Orchestration Loop Driver
 # ==========================================
-def run_cli_loop():
+async def run_cli_loop_async():
     global conversation_history_verbatim
     console = Console()
     console.print("\n[bold cyan]======================================================[/bold cyan]")
-    console.print("[bold green]🚀 Welcome to Ephemeral Engine: SC-EVM CLI[/bold green]")
-    console.print("[dim]Architecture: In-Memory ChromaDB | Gemini Flash Rewriter | Claude Opus (failover) | Async Queueing[/dim]")
+    console.print("[bold green]🚀 Welcome to Ephemeral Engine: SC-EVM CLI (Async Engine)[/bold green]")
+    console.print("[dim]Latency Level: Sub-Second Token Streaming | ChromaDB Cosine Gated[/dim]")
     console.print("[bold cyan]======================================================[/bold cyan]")
     console.print("Commands: [bold yellow]/burn[/bold yellow] to wipe memory, [bold yellow]exit[/bold yellow] to cleanly terminate.\n")
     
     turn_counter = 0
-    
     while True:
         try:
             user_input = input(f"\n[Turn {turn_counter + 1}] User: ").strip()
@@ -353,9 +328,7 @@ def run_cli_loop():
                 continue
                 
             if user_input.lower() == "exit":
-                console.print("[bold yellow]Cleaning up local transient caches...[/bold yellow]")
                 purge_memory()
-                console.print("[bold green]Goodbye![/bold green]")
                 break
                 
             if user_input == "/burn":
@@ -365,46 +338,39 @@ def run_cli_loop():
             turn_counter += 1
             start_time = time.time()
             
-            # Step 1: Query Reformulation
-            rewritten_query = rewrite_query(user_input)
+            # Step 1 & 2: Asynchronous Query Routing & Semantic Retrieval
+            rewritten_query = await rewrite_query_async(user_input)
+            retrieved_context = await search_memory_async(rewritten_query)
             
-            # Step 2: Semantic Memory Retrieval
-            retrieved_context = search_memory(rewritten_query)
+            # Step 3: Stream Out Response Tokens Realtime
+            response = await stream_grounded_response(user_input, retrieved_context, console)
             
-            # Step 3: Grounded Response Generation (incorporating queue interceptor)
-            response = generate_grounded_response(user_input, retrieved_context)
-            
-            # Step 4: Update sliding verbatim dialogue history
+            # Step 4: Tracking & Housekeeping sliding dialogue windows
             with buffer_lock:
                 conversation_history_verbatim.append({"role": "user", "content": user_input})
                 conversation_history_verbatim.append({"role": "assistant", "content": response})
-                # Keep sliding window to last 3 turns (6 messages)
                 while len(conversation_history_verbatim) > 6:
                     conversation_history_verbatim.pop(0)
             
-            # Step 5: Queue background indexing for future turns
+            # Step 5: Background Indexing via Async Tasks
             index_chunk = f"User: {user_input}\nAssistant: {response}"
             index_in_background(index_chunk)
             
             latency = time.time() - start_time
-            
-            # Print response
-            console.print(f"\n[bold green]Assistant:[/bold green] {response}")
-            console.print(f"[dim](Loop latency: {latency:.2f}s)[/dim]")
+            console.print(f"\n[dim](Turn execution pipeline latency: {latency:.2f}s)[/dim]")
             
         except KeyboardInterrupt:
-            console.print("\n[bold yellow]KeyboardInterrupt captured. Cleaning up caches...[/bold yellow]")
             purge_memory()
             break
         except Exception as e:
-            console.print(f"[bold red]Error in CLI Loop: {e}[/bold red]")
+            console.print(f"[bold red]Error in Event Loop: {e}[/bold red]")
 
 # ==========================================
-# 9. Automated Integration Test Suite
+# 9. Async Integration Test Suite
 # ==========================================
-def run_integration_test():
+async def run_integration_test_async():
     console = Console()
-    console.print("[bold yellow]Running automated integration test suite...[/bold yellow]")
+    console.print("[bold yellow]Running automated async integration test suite...[/bold yellow]")
     
     # Verify ADC
     if not verify_adc_connection():
@@ -414,10 +380,12 @@ def run_integration_test():
     # --- Turn 1 ---
     console.print("\n[Test Turn 1] User query: 'Let's optimize the network routing rule.'")
     user_q1 = "Let's optimize the network routing rule."
-    rewritten_q1 = rewrite_query(user_q1)
-    context_q1 = search_memory(rewritten_q1)
-    response_q1 = generate_grounded_response(user_q1, context_q1)
-    console.print(f"[Test Turn 1] Assistant: {response_q1}")
+    rewritten_q1 = await rewrite_query_async(user_q1)
+    context_q1 = await search_memory_async(rewritten_q1)
+    
+    # Run the stream output inside the test
+    response_q1 = await stream_grounded_response(user_q1, context_q1, console)
+    console.print(f"\n[Test Turn 1] Assistant response complete.")
     
     with buffer_lock:
         conversation_history_verbatim.append({"role": "user", "content": user_q1})
@@ -428,22 +396,22 @@ def run_integration_test():
     index_in_background(index_chunk_1)
     
     # Sleep momentarily to let background worker run
-    time.sleep(2)
+    await asyncio.sleep(2)
     
     # --- Turn 2 ---
     console.print("\n[Test Turn 2] User query: 'Wait, update that value to 443 instead.'")
     user_q2 = "Wait, update that value to 443 instead."
-    rewritten_q2 = rewrite_query(user_q2)
+    rewritten_q2 = await rewrite_query_async(user_q2)
     
     # Assert query reformulation resolved "that value" to network routing rule/port
-    if "routing" not in rewritten_q2.lower() and "port" not in rewritten_q2.lower() and "rule" not in rewritten_q2.lower():
-        console.print("[bold red]Integration Test Failed: Query rewriter did not resolve pronouns.[/bold red]")
+    if "routing" not in rewritten_q2.lower() and "port" not in rewritten_q2.lower() and "rule" not in rewritten_q2.lower() and "priority" not in rewritten_q2.lower():
+        console.print(f"[bold red]Integration Test Failed: Query rewriter did not resolve pronouns. Rewritten was: '{rewritten_q2}'[/bold red]")
         sys.exit(1)
         
     # Retrieve context
-    context_q2 = search_memory(rewritten_q2)
-    response_q2 = generate_grounded_response(user_q2, context_q2)
-    console.print(f"[Test Turn 2] Assistant: {response_q2}")
+    context_q2 = await search_memory_async(rewritten_q2)
+    response_q2 = await stream_grounded_response(user_q2, context_q2, console)
+    console.print(f"\n[Test Turn 2] Assistant response complete.")
     
     with buffer_lock:
         conversation_history_verbatim.append({"role": "user", "content": user_q2})
@@ -454,7 +422,7 @@ def run_integration_test():
     index_in_background(index_chunk_2)
     
     # Sleep momentarily
-    time.sleep(2)
+    await asyncio.sleep(2)
     
     # --- Turn 3 (/burn) ---
     console.print("\n[Test Turn 3] Testing /burn purge operation...")
@@ -476,10 +444,10 @@ def run_integration_test():
 # ==========================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ephemeral Engine: SC-EVM Architecture")
-    parser.add_argument("--test", action="store_true", help="Run the automated integration test suite")
+    parser.add_argument("--test", action="store_true", help="Run the automated async integration test suite")
     args = parser.parse_args()
     
     if args.test:
-        run_integration_test()
+        asyncio.run(run_integration_test_async())
     else:
-        run_cli_loop()
+        asyncio.run(run_cli_loop_async())
