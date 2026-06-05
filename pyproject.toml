@@ -1,0 +1,29 @@
+[project]
+name = "ephemeral-engine"
+version = "0.1.0"
+description = "A terminal-based personal assistant powered by Vertex AI Gemini and Claude with dual-memory."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "rich>=13.0.0",
+    "google-genai>=0.3.0",
+    "anthropic[vertex]>=0.25.0",
+    "google-auth>=2.20.0",
+    "pydantic>=2.5.0",
+    "pyperclip>=1.8.2",
+    "pystray>=0.19.3",
+    "Pillow>=9.0.0",
+    "cryptography>=41.0.0",
+    "pynput>=1.7.6",
+    "keyring>=24.0.0",
+]
+
+[project.scripts]
+assistant = "src.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
