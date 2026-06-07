@@ -1,0 +1,118 @@
+{
+  "timestamp": "2026-06-07T16:08:20.204579Z",
+  "overall_status": "SUCCESS",
+  "port_configured": 8000,
+  "session_a_id": "tenant-session-alpha",
+  "session_b_id": "tenant-session-beta",
+  "assertions": [
+    {
+      "assertion": "SessionA Knows Its Secret",
+      "passed": true
+    },
+    {
+      "assertion": "SessionA Wont Leak SessionB Secret",
+      "passed": true
+    },
+    {
+      "assertion": "SessionB Knows Its Secret",
+      "passed": true
+    },
+    {
+      "assertion": "SessionB Wont Leak SessionA Secret",
+      "passed": true
+    },
+    {
+      "assertion": "SessionA Forgot Secret Post-Burn",
+      "passed": true
+    },
+    {
+      "assertion": "SessionB Remains Intact Post-Burn",
+      "passed": true
+    }
+  ],
+  "execution_log": [
+    {
+      "timestamp": "2026-06-07T16:06:51.114089Z",
+      "event": "TestStart",
+      "detail": "Initiating SC-EVM verification harness"
+    },
+    {
+      "timestamp": "2026-06-07T16:06:55.233004Z",
+      "event": "InitSession",
+      "detail": "Initializing: tenant-session-alpha"
+    },
+    {
+      "timestamp": "2026-06-07T16:06:55.239089Z",
+      "event": "InitSession",
+      "detail": "Initializing: tenant-session-beta"
+    },
+    {
+      "timestamp": "2026-06-07T16:06:55.241900Z",
+      "event": "InjectState",
+      "detail": "Seeding Tenant A context tracking anchors."
+    },
+    {
+      "timestamp": "2026-06-07T16:06:55.244595Z",
+      "event": "InjectState",
+      "detail": "Seeding Tenant B context tracking anchors."
+    },
+    {
+      "timestamp": "2026-06-07T16:06:55.247162Z",
+      "event": "TimingConstraint",
+      "detail": "Initiating 45-second architectural cooling step window"
+    },
+    {
+      "timestamp": "2026-06-07T16:07:50.879280Z",
+      "event": "QueryTelemetry",
+      "detail": {
+        "session_id": "tenant-session-alpha",
+        "prompt": "What is my validation ID?",
+        "latency_seconds": 10.630988476999846,
+        "response_length": 42
+      }
+    },
+    {
+      "timestamp": "2026-06-07T16:08:03.590770Z",
+      "event": "QueryTelemetry",
+      "detail": {
+        "session_id": "tenant-session-beta",
+        "prompt": "What is my validation ID?",
+        "latency_seconds": 12.711252432000038,
+        "response_length": 528
+      }
+    },
+    {
+      "timestamp": "2026-06-07T16:08:03.590858Z",
+      "event": "ResourceCleanlinessInit",
+      "detail": "Issuing DELETE /burn to tenant-session-alpha"
+    },
+    {
+      "timestamp": "2026-06-07T16:08:12.817145Z",
+      "event": "QueryTelemetry",
+      "detail": {
+        "session_id": "tenant-session-alpha",
+        "prompt": "What is my validation ID?",
+        "latency_seconds": 9.222358210000493,
+        "response_length": 194
+      }
+    },
+    {
+      "timestamp": "2026-06-07T16:08:20.001721Z",
+      "event": "QueryTelemetry",
+      "detail": {
+        "session_id": "tenant-session-beta",
+        "prompt": "What is my validation ID?",
+        "latency_seconds": 7.184457276000103,
+        "response_length": 93
+      }
+    },
+    {
+      "timestamp": "2026-06-07T16:08:20.006735Z",
+      "event": "ResourceCleanlinessComplete",
+      "detail": {
+        "session_a_post_burn": "I cannot provide a validation ID. As an AI, I do not have access to user accounts, session information, or personal identifiers. I do not have a profile for you and cannot see any personal data.",
+        "session_b_post_burn": "Based on the provided conversation history, the user's validation ID is `BETA-TITANIUM-1104`."
+      }
+    }
+  ]
+}
