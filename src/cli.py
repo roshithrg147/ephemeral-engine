@@ -343,3 +343,11 @@ class TerminalUI:
                     self.console.print(f"[bold green]✓ File written successfully.[/bold green]")
                 except Exception as e:
                     self.console.print(f"[bold red]File write failed:[/bold red] {e}")
+
+def main():
+    ui = TerminalUI()
+    ui.run_interactive_loop()
+
+if __name__ == "__main__":
+    main()
+

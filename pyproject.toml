@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.scripts]
-assistant = "src.main:main"
+assistant = "src.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
