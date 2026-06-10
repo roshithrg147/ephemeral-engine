@@ -11,11 +11,8 @@ import google.auth
 from google import genai
 from google.genai import types
 
-from src.memory import MultiTenantSessionRegistry
+from src.memory import session_registry
 from src.sc_evm import SCEVMEngine
-
-# Global thread-safe/async-safe session registry container
-session_registry = MultiTenantSessionRegistry()
 
 # Persistent Global Connection Singleton client caching
 _GENAI_CLIENT: Optional[genai.Client] = None
@@ -124,10 +121,10 @@ async def burn_session(session_id: str) -> StandardResponseEnvelope:
 
 async def sse_query_generator(session_id: str, prompt: str) -> AsyncIterator[str]:
     """Generates server-sent events for query reformulation, context retrieval, and response token streams."""
+    # 1. Initialize/Retrieve session registration record
+    record = await session_registry.initialize_session(session_id)
     session_lock = await session_registry.get_session_lock(session_id)
     async with session_lock:
-        # 1. Initialize/Retrieve session registration record
-        record = await session_registry.initialize_session(session_id)
         history = list(record.chat_history)
         client = await get_genai_client()
 
@@ -177,51 +174,21 @@ You must return your output strictly as a valid raw JSON object with two keys: "
                 include=["documents", "distances", "embeddings"]
             )
 
-            matched_docs: List[str] = []
-            matched_dists: List[float] = []
-            matched_embs: List[List[float]] = []
-
             if results and "documents" in results and results["documents"]:
                 docs = results["documents"][0]
                 distances = results["distances"][0] if "distances" in results else [0.0] * len(docs)
                 embeddings = results["embeddings"][0] if "embeddings" in results else [[]] * len(docs)
 
-                if len(docs) > 0:
-                    top_dist = distances[0]
-                    # Absolute ceiling exclusion check (dist > 0.48 -> rejected)
-                    if top_dist <= 0.48:
-                        for doc, dist, emb in zip(docs, distances, embeddings):
-                            if dist > 0.48:
-                                continue
-                            # Rule 1: Absolute Confidence Floor
-                            if dist <= 0.40:
-                                matched_docs.append(doc)
-                                matched_dists.append(dist)
-                                matched_embs.append(emb)
-                            # Rule 2: Dual-Anchor Gating Delta Evaluation
-                            else:
-                                if matched_dists:
-                                    prev_accepted_dist = matched_dists[-1]
-                                    neighboring_delta = dist - prev_accepted_dist
-                                    top_anchor_delta = dist - top_dist
+                # Fetch baseline threshold dynamically from metadata_registry
+                base_threshold = record.metadata_registry.get("base_threshold", 0.52)
 
-                                    # Run core gated validation logic
-                                    _, passes_gate = SCEVMEngine.calculate_dual_anchor_gating(
-                                        query_vector,
-                                        matched_embs[0],  # Anchor A
-                                        matched_embs[-1], # Anchor B
-                                        base_threshold=0.52 # sim >= 0.52 maps to dist <= 0.48
-                                    )
-                                    if passes_gate and neighboring_delta <= 0.12 and top_anchor_delta <= 0.18:
-                                        matched_docs.append(doc)
-                                        matched_dists.append(dist)
-                                        matched_embs.append(emb)
-                                else:
-                                    # Accept top match if it is within absolute ceiling
-                                    matched_docs.append(doc)
-                                    matched_dists.append(dist)
-                                    matched_embs.append(emb)
-            retrieved_context = matched_docs
+                retrieved_context = SCEVMEngine.filter_documents_via_gating(
+                    query_vector=query_vector,
+                    documents=docs,
+                    distances=distances,
+                    embeddings=embeddings,
+                    base_threshold=base_threshold
+                )
         except Exception:
             pass
 

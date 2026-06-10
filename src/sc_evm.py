@@ -53,3 +53,67 @@ class SCEVMEngine:
         passes_gate = max_similarity >= base_threshold
 
         return max_similarity, passes_gate
+
+    @staticmethod
+    def filter_documents_via_gating(
+        query_vector: List[float],
+        documents: List[str],
+        distances: List[float],
+        embeddings: List[List[float]],
+        *,
+        base_threshold: float = 0.52,
+        absolute_ceiling: float = 0.48,
+        absolute_floor: float = 0.40,
+        neighboring_delta_limit: float = 0.12,
+        top_anchor_delta_limit: float = 0.18
+    ) -> List[str]:
+        """Filters retrieved documents through the dual-anchor gating rules.
+        
+        Uses floor, ceiling, and neighbor delta limits to prevent irrelevant context creep.
+        """
+        if not documents:
+            return []
+
+        matched_docs: List[str] = []
+        matched_dists: List[float] = []
+        matched_embs: List[List[float]] = []
+
+        top_dist = distances[0]
+        # Absolute ceiling exclusion check (dist > absolute_ceiling -> rejected)
+        if top_dist > absolute_ceiling:
+            return []
+
+        for doc, dist, emb in zip(documents, distances, embeddings):
+            if dist > absolute_ceiling:
+                continue
+
+            # Rule 1: Absolute Confidence Floor
+            if dist <= absolute_floor:
+                matched_docs.append(doc)
+                matched_dists.append(dist)
+                matched_embs.append(emb)
+            # Rule 2: Dual-Anchor Gating Delta Evaluation
+            else:
+                if matched_dists:
+                    prev_accepted_dist = matched_dists[-1]
+                    neighboring_delta = dist - prev_accepted_dist
+                    top_anchor_delta = dist - top_dist
+
+                    # Run core gated validation logic
+                    _, passes_gate = SCEVMEngine.calculate_dual_anchor_gating(
+                        query_vector,
+                        matched_embs[0],  # Anchor A
+                        matched_embs[-1], # Anchor B
+                        base_threshold=base_threshold
+                    )
+                    if passes_gate and neighboring_delta <= neighboring_delta_limit and top_anchor_delta <= top_anchor_delta_limit:
+                        matched_docs.append(doc)
+                        matched_dists.append(dist)
+                        matched_embs.append(emb)
+                else:
+                    # Accept top match if it is within absolute ceiling
+                    matched_docs.append(doc)
+                    matched_dists.append(dist)
+                    matched_embs.append(emb)
+
+        return matched_docs

@@ -38,8 +38,8 @@ class AgentOrchestrator:
         # Configure model names
         self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
         # In Vertex AI, Claude 3.5 Sonnet is often 'claude-3-5-sonnet@20240620' or 'claude-3-5-sonnet-v2'
-        # Or 'claude-opus-4-6' as in the user's original script
-        self.claude_model = os.getenv("CLAUDE_MODEL", "claude-opus-4-6")
+        # Or 'claude-opus-4-8' as in the user's original script
+        self.claude_model = os.getenv("CLAUDE_MODEL", "claude-opus-4-8")
         self.refiner_model = os.getenv("REFINER_MODEL", "gemini-2.5-pro")
         self.imagen_model = os.getenv("IMAGEN_MODEL", "imagen-3.0-generate-002")
         
@@ -76,7 +76,7 @@ class AgentOrchestrator:
             self.claude_client = Anthropic(api_key=anthropic_api_key, max_retries=0)
             # Automatically map Vertex AI specific model IDs to standard Anthropic ones
             original_claude_model = os.getenv("CLAUDE_MODEL", self.claude_model)
-            if "opus" in original_claude_model.lower() or "4-6" in original_claude_model:
+            if "opus" in original_claude_model.lower() or "4-6" in original_claude_model or "4-8" in original_claude_model:
                 self.claude_model = "claude-3-opus-20240229"
             elif "sonnet" in original_claude_model.lower():
                 self.claude_model = "claude-3-5-sonnet-20241022"
@@ -216,7 +216,7 @@ Provide clear, helpful, and technically accurate responses. Keep terminal contex
         """Uses Gemini structured JSON mode to weigh both responses and return a RefinedResponse."""
         synthesis_prompt = f"""You are the Synthesizer/Refiner for a Dual-LLM Personal Assistant.
 You have received two responses to the user's prompt:
-1. Response A (from Claude 3.5 Sonnet / 3 Opus)
+1. Response A (from Claude 3.5 Sonnet / Opus 4.8)
 2. Response B (from Gemini 2.5 Pro)
 
 Your task is to:
