@@ -105,33 +105,82 @@ class NVIDIA_NIM_Client:
 
         if stream:
             def gen():
-                with httpx.Client(timeout=None) as client:
-                    with client.stream("POST", "https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, json=payload) as response:
-                        if response.status_code != 200:
-                            raise RuntimeError(f"NVIDIA API Error: Status {response.status_code}, Detail: {response.read().decode('utf-8')}")
-                        for line in response.iter_lines():
-                            line = line.strip()
-                            if not line:
-                                continue
-                            if line.startswith("data: "):
-                                data_str = line[len("data: "):]
-                                if data_str == "[DONE]":
-                                    break
-                                try:
-                                    chunk = json.loads(data_str)
-                                    content = chunk["choices"][0]["delta"].get("content", "")
-                                    if content:
-                                        yield content
-                                except Exception:
-                                    pass
+                import time
+                max_retries = 3
+                backoff = 1.0
+                response = None
+                client = None
+                for attempt in range(max_retries + 1):
+                    try:
+                        client = httpx.Client(timeout=None)
+                        response = client.send(client.build_request("POST", "https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, json=payload), stream=True)
+                        if response.status_code == 200:
+                            break
+                        elif response.status_code in [500, 502, 503, 504] and attempt < max_retries:
+                            response.close()
+                            client.close()
+                            time.sleep(backoff)
+                            backoff *= 2
+                            continue
+                        else:
+                            detail = response.read()
+                            response.close()
+                            client.close()
+                            raise RuntimeError(f"NVIDIA API Error: Status {response.status_code}, Detail: {detail.decode('utf-8')}")
+                    except (httpx.HTTPError, httpx.TimeoutException) as e:
+                        if response:
+                            response.close()
+                        if client:
+                            client.close()
+                        if attempt < max_retries:
+                            time.sleep(backoff)
+                            backoff *= 2
+                            continue
+                        raise e
+                
+                try:
+                    for line in response.iter_lines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        if line.startswith("data: "):
+                            data_str = line[len("data: "):]
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data_str)
+                                content = chunk["choices"][0]["delta"].get("content", "")
+                                if content:
+                                    yield content
+                            except Exception:
+                                pass
+                finally:
+                    response.close()
+                    client.close()
             return gen()
         else:
-            with httpx.Client(timeout=None) as client:
-                response = client.post("https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, json=payload)
-                if response.status_code != 200:
-                    raise RuntimeError(f"NVIDIA API Error: Status {response.status_code}, Detail: {response.text}")
-                result = response.json()
-                return result["choices"][0]["message"]["content"]
+            import time
+            max_retries = 3
+            backoff = 1.0
+            for attempt in range(max_retries + 1):
+                try:
+                    with httpx.Client(timeout=None) as client:
+                        response = client.post("https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, json=payload)
+                        if response.status_code == 200:
+                            result = response.json()
+                            return result["choices"][0]["message"]["content"]
+                        elif response.status_code in [500, 502, 503, 504] and attempt < max_retries:
+                            time.sleep(backoff)
+                            backoff *= 2
+                            continue
+                        else:
+                            raise RuntimeError(f"NVIDIA API Error: Status {response.status_code}, Detail: {response.text}")
+                except (httpx.HTTPError, httpx.TimeoutException) as e:
+                    if attempt < max_retries:
+                        time.sleep(backoff)
+                        backoff *= 2
+                        continue
+                    raise e
 
     async def call_llm_async(self, model_key: str, prompt: Union[str, List[Dict[str, str]]], 
                              system_prompt: Optional[str] = None, stream: bool = False) -> Union[str, AsyncIterator[str]]:
@@ -145,31 +194,79 @@ class NVIDIA_NIM_Client:
 
         if stream:
             async def gen():
-                async with httpx.AsyncClient(timeout=None) as client:
-                    async with client.stream("POST", "https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, json=payload) as response:
-                        if response.status_code != 200:
+                import asyncio
+                max_retries = 3
+                backoff = 1.0
+                response = None
+                client = None
+                for attempt in range(max_retries + 1):
+                    try:
+                        client = httpx.AsyncClient(timeout=None)
+                        response = await client.send(client.build_request("POST", "https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, json=payload), stream=True)
+                        if response.status_code == 200:
+                            break
+                        elif response.status_code in [500, 502, 503, 504] and attempt < max_retries:
+                            await response.aclose()
+                            await client.aclose()
+                            await asyncio.sleep(backoff)
+                            backoff *= 2
+                            continue
+                        else:
                             detail = await response.aread()
+                            await response.aclose()
+                            await client.aclose()
                             raise RuntimeError(f"NVIDIA API Error: Status {response.status_code}, Detail: {detail.decode('utf-8')}")
-                        async for line in response.aiter_lines():
-                            line = line.strip()
-                            if not line:
-                                continue
-                            if line.startswith("data: "):
-                                data_str = line[len("data: "):]
-                                if data_str == "[DONE]":
-                                    break
-                                try:
-                                    chunk = json.loads(data_str)
-                                    content = chunk["choices"][0]["delta"].get("content", "")
-                                    if content:
-                                        yield content
-                                except Exception:
-                                    pass
+                    except (httpx.HTTPError, httpx.TimeoutException) as e:
+                        if response:
+                            await response.aclose()
+                        if client:
+                            await client.aclose()
+                        if attempt < max_retries:
+                            await asyncio.sleep(backoff)
+                            backoff *= 2
+                            continue
+                        raise e
+                
+                try:
+                    async for line in response.aiter_lines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        if line.startswith("data: "):
+                            data_str = line[len("data: "):]
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data_str)
+                                content = chunk["choices"][0]["delta"].get("content", "")
+                                if content:
+                                    yield content
+                            except Exception:
+                                pass
+                finally:
+                    await response.aclose()
+                    await client.aclose()
             return gen()
         else:
-            async with httpx.AsyncClient(timeout=None) as client:
-                response = await client.post("https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, json=payload)
-                if response.status_code != 200:
-                    raise RuntimeError(f"NVIDIA API Error: Status {response.status_code}, Detail: {response.text}")
-                result = response.json()
-                return result["choices"][0]["message"]["content"]
+            import asyncio
+            max_retries = 3
+            backoff = 1.0
+            for attempt in range(max_retries + 1):
+                try:
+                    async with httpx.AsyncClient(timeout=None) as client:
+                        response = await client.post("https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, json=payload)
+                        if response.status_code == 200:
+                            result = response.json()
+                            return result["choices"][0]["message"]["content"]
+                        elif response.status_code in [500, 502, 503, 504] and attempt < max_retries:
+                            await asyncio.sleep(backoff)
+                            backoff *= 2
+                            continue
+                        else:
+                            raise RuntimeError(f"NVIDIA API Error: Status {response.status_code}, Detail: {response.text}")
+                except (httpx.HTTPError, httpx.TimeoutException) as e:
+                    if attempt < max_retries:
+                        await asyncio.sleep(backoff)
+                        backoff *= 2
+                        continue
+                    raise e

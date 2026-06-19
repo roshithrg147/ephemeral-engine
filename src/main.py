@@ -179,7 +179,7 @@ async def get_session_memory(session_id: str) -> StandardResponseEnvelope:
         # Get documents from ChromaDB collection
         docs = []
         try:
-            res = record.collection.get()
+            res = record.collection.get(where={"session_id": session_id})
             if res and "documents" in res:
                 docs = res["documents"]
         except Exception:
@@ -230,6 +230,7 @@ async def sse_query_generator(session_id: str, prompt: str) -> AsyncIterator[str
             results = collection.query(
                 query_embeddings=[query_vector],
                 n_results=3,
+                where={"session_id": session_id},
                 include=["documents", "distances", "embeddings"]
             )
 
@@ -328,7 +329,7 @@ async def sse_query_generator(session_id: str, prompt: str) -> AsyncIterator[str
                     ids=[doc_id],
                     embeddings=[vector],
                     documents=[index_chunk],
-                    metadatas=[{"timestamp": int(time.time())}]
+                    metadatas=[{"timestamp": int(time.time()), "session_id": session_id}]
                 )
             except Exception:
                 pass

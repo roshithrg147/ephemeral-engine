@@ -182,3 +182,14 @@ assistant_generated.png
 PROJECTINSIGHT.md
 dp_fibonacci.py
 summary-notes-skill-gitrepo.md
+
+# Ephemeral Engine Tests and Reports
+tests/
+src/tests/
+run_all_tests.py
+*report.json
+*report.json.metadata.json
+*.log
+sc_evm_validation_report.json
+consolidated_test_report.json
+
