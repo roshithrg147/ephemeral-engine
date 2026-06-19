@@ -3,10 +3,73 @@ import json
 import asyncio
 import logging
 from datetime import datetime
+from collections import defaultdict
 from typing import Dict, List, Any, Optional
 import chromadb
 from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
+
+class SessionLock:
+    """
+    A custom reader-writer lock with writer preference.
+    Supports 'async with' directly as an exclusive write lock.
+    Exposes 'read_lock()' context manager for concurrent reads.
+    """
+    def __init__(self):
+        self.write_lock = asyncio.Lock()
+        self.num_readers = 0
+        self.readers_done = asyncio.Event()
+        self.readers_done.set()
+        self.pending_writers = 0
+
+    async def __aenter__(self):
+        """Acquires the exclusive write lock."""
+        await self.acquire_write()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Releases the exclusive write lock."""
+        self.release_write()
+
+    async def acquire_write(self):
+        self.pending_writers += 1
+        await self.write_lock.acquire()
+        await self.readers_done.wait()
+
+    def release_write(self):
+        self.pending_writers -= 1
+        self.write_lock.release()
+
+    async def acquire_read(self):
+        # If write lock is held or a writer is waiting, wait for the write lock
+        if self.write_lock.locked() or self.pending_writers > 0:
+            async with self.write_lock:
+                pass
+        self.num_readers += 1
+        self.readers_done.clear()
+
+    def release_read(self):
+        self.num_readers -= 1
+        if self.num_readers == 0:
+            self.readers_done.set()
+
+    def read_lock(self):
+        """Returns a context manager for concurrent reads."""
+        return _SessionReadLock(self)
+
+
+class _SessionReadLock:
+    """Helper context manager class for reading."""
+    def __init__(self, lock: SessionLock):
+        self.lock = lock
+
+    async def __aenter__(self):
+        await self.lock.acquire_read()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.lock.release_read()
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SC-EVM.Memory")
@@ -149,9 +212,12 @@ class SessionRecord:
             "token_budget": 2500
         }
         # Initialize isolated, memory-mapped storage engine
+        from chromadb.utils import embedding_functions
         self.chroma_client: ClientAPI = chromadb.EphemeralClient()
+        self.embedding_fn = embedding_functions.ONNXMiniLM_L6_V2()
         self.collection: Collection = self.chroma_client.get_or_create_collection(
-            name=f"session_{session_id}"
+            name=f"session_{session_id}",
+            embedding_function=self.embedding_fn
         )
         logger.info(f"Initialized volatile vector collection space for tenant session: {session_id}")
 
@@ -163,24 +229,22 @@ class MultiTenantSessionRegistry:
     """
     def __init__(self):
         self._sessions: Dict[str, SessionRecord] = {}
-        self._locks: Dict[str, asyncio.Lock] = {}
+        self.locks: defaultdict[str, SessionLock] = defaultdict(SessionLock)
+        self._locks = self.locks  # Maintain compatibility
         self._global_lock: asyncio.Lock = asyncio.Lock()
 
-    async def get_session_lock(self, session_id: str) -> asyncio.Lock:
+    async def get_session_lock(self, session_id: str) -> SessionLock:
         """
         Retrieves or initializes an atomic lock bound exclusively to the tenant session context.
         """
-        async with self._global_lock:
-            if session_id not in self._locks:
-                self._locks[session_id] = asyncio.Lock()
-            return self._locks[session_id]
+        return self.locks[session_id]
 
     async def initialize_session(self, session_id: str) -> SessionRecord:
         """
         Dynamically initializes an isolated, memory-confined session profile for a user.
+        Uses exclusive write lock.
         """
-        lock = await self.get_session_lock(session_id)
-        async with lock:
+        async with self.locks[session_id]:
             if session_id not in self._sessions:
                 self._sessions[session_id] = SessionRecord(session_id)
             return self._sessions[session_id]
@@ -188,17 +252,17 @@ class MultiTenantSessionRegistry:
     async def get_session(self, session_id: str) -> Optional[SessionRecord]:
         """
         Fetches an existing session profile without forcing side-effect mutations.
+        Uses concurrent read lock.
         """
-        lock = await self.get_session_lock(session_id)
-        async with lock:
+        async with self.locks[session_id].read_lock():
             return self._sessions.get(session_id)
 
     async def append_message(self, session_id: str, role: str, content: str) -> None:
         """
         Appends a verified conversation log directly to the tenant's history buffer.
+        Uses exclusive write lock.
         """
-        lock = await self.get_session_lock(session_id)
-        async with lock:
+        async with self.locks[session_id]:
             if session_id in self._sessions:
                 self._sessions[session_id].chat_history.append({"role": role, "content": content})
             else:
@@ -208,9 +272,9 @@ class MultiTenantSessionRegistry:
         """
         Forces a physical memory purge of the isolated session record.
         Wipes the ephemeral client allocation completely.
+        Uses exclusive write lock.
         """
-        lock = await self.get_session_lock(session_id)
-        async with lock:
+        async with self.locks[session_id]:
             async with self._global_lock:
                 if session_id in self._sessions:
                     # Wipe memory structures explicitly
@@ -221,8 +285,8 @@ class MultiTenantSessionRegistry:
                         logger.warning(f"Error purging vector space for session {session_id}: {e}")
 
                     del self._sessions[session_id]
-                    if session_id in self._locks:
-                        del self._locks[session_id]
+                    if session_id in self.locks:
+                        del self.locks[session_id]
                     logger.info(f"Programmatic /burn executed successfully. Purged space for: {session_id}")
                     return True
                 return False

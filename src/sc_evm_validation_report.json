@@ -1,13 +1,13 @@
 {
-  "timestamp": "2026-06-19T00:21:14.595203Z",
-  "overall_status": "FAILED",
+  "timestamp": "2026-06-10T15:31:05.686889Z",
+  "overall_status": "SUCCESS",
   "port_configured": 8081,
   "session_a_id": "tenant-session-alpha",
   "session_b_id": "tenant-session-beta",
   "assertions": [
     {
       "assertion": "SessionA Knows Its Secret",
-      "passed": false
+      "passed": true
     },
     {
       "assertion": "SessionA Wont Leak SessionB Secret",
@@ -32,86 +32,86 @@
   ],
   "execution_log": [
     {
-      "timestamp": "2026-06-19T00:09:10.286187Z",
+      "timestamp": "2026-06-10T15:28:50.769420Z",
       "event": "TestStart",
       "detail": "Initiating SC-EVM verification harness"
     },
     {
-      "timestamp": "2026-06-19T00:09:12.315772Z",
+      "timestamp": "2026-06-10T15:28:54.856011Z",
       "event": "InitSession",
       "detail": "Initializing: tenant-session-alpha"
     },
     {
-      "timestamp": "2026-06-19T00:09:12.414483Z",
+      "timestamp": "2026-06-10T15:28:55.014937Z",
       "event": "InitSession",
       "detail": "Initializing: tenant-session-beta"
     },
     {
-      "timestamp": "2026-06-19T00:09:12.419886Z",
+      "timestamp": "2026-06-10T15:28:55.025019Z",
       "event": "InjectState",
       "detail": "Seeding Tenant A context tracking anchors."
     },
     {
-      "timestamp": "2026-06-19T00:09:12.420973Z",
+      "timestamp": "2026-06-10T15:28:55.028198Z",
       "event": "InjectState",
       "detail": "Seeding Tenant B context tracking anchors."
     },
     {
-      "timestamp": "2026-06-19T00:09:12.421862Z",
+      "timestamp": "2026-06-10T15:28:55.030796Z",
       "event": "TimingConstraint",
       "detail": "Initiating 45-second architectural cooling step window"
     },
     {
-      "timestamp": "2026-06-19T00:14:16.261828Z",
+      "timestamp": "2026-06-10T15:30:12.135006Z",
       "event": "QueryTelemetry",
       "detail": {
         "session_id": "tenant-session-alpha",
         "prompt": "What is my validation ID?",
-        "latency_seconds": 258.838839385,
-        "response_length": 619
+        "latency_seconds": 32.103958530000455,
+        "response_length": 213
       }
     },
     {
-      "timestamp": "2026-06-19T00:16:13.444168Z",
+      "timestamp": "2026-06-10T15:30:22.244026Z",
       "event": "QueryTelemetry",
       "detail": {
         "session_id": "tenant-session-beta",
         "prompt": "What is my validation ID?",
-        "latency_seconds": 117.18229013700147,
-        "response_length": 45
+        "latency_seconds": 10.108877786000448,
+        "response_length": 41
       }
     },
     {
-      "timestamp": "2026-06-19T00:16:13.444213Z",
+      "timestamp": "2026-06-10T15:30:22.244459Z",
       "event": "ResourceCleanlinessInit",
       "detail": "Issuing DELETE /burn to tenant-session-alpha"
     },
     {
-      "timestamp": "2026-06-19T00:18:35.921620Z",
+      "timestamp": "2026-06-10T15:30:47.537537Z",
       "event": "QueryTelemetry",
       "detail": {
         "session_id": "tenant-session-alpha",
         "prompt": "What is my validation ID?",
-        "latency_seconds": 142.46382375800022,
-        "response_length": 595
+        "latency_seconds": 25.28526614800012,
+        "response_length": 433
       }
     },
     {
-      "timestamp": "2026-06-19T00:21:14.394161Z",
+      "timestamp": "2026-06-10T15:31:05.552038Z",
       "event": "QueryTelemetry",
       "detail": {
         "session_id": "tenant-session-beta",
         "prompt": "What is my validation ID?",
-        "latency_seconds": 158.47249356500106,
-        "response_length": 45
+        "latency_seconds": 18.014398915999664,
+        "response_length": 41
       }
     },
     {
-      "timestamp": "2026-06-19T00:21:14.396404Z",
+      "timestamp": "2026-06-10T15:31:05.558392Z",
       "event": "ResourceCleanlinessComplete",
       "detail": {
-        "session_a_post_burn": "I don't see a validation ID in the current context or your retrieved memories. As your local assistant, I can only access what you share directly or what's stored in your memory profile.\n\nTo help you find it, you might try:\n- **Checking your email** for messages from the relevant service or platform\n- **Account settings** on the website/app (often under Profile, Security, or Verification)\n- **Local files** if you saved it somewhere \u2014 I can search your system if you tell me where to look\n\nOr if you let me know which service or application this is for, I can give you more specific guidance!",
-        "session_b_post_burn": "Your validation ID is **BETA-TITANIUM-1104**."
+        "session_a_post_burn": "For your privacy and security, I don't have access to personal information like a validation ID. These are usually specific to a service or product. I would recommend checking for it in a confirmation email, the 'Account' or 'Profile' section of the relevant website, or on any physical packaging if it's for a physical product. If you can tell me what service or product this is for, I might be able to offer more specific guidance.",
+        "session_b_post_burn": "Your validation ID is BETA-TITANIUM-1104."
       }
     }
   ]

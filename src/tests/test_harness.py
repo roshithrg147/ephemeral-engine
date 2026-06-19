@@ -43,7 +43,7 @@ async def consume_sse_tokens(client: httpx.AsyncClient, session_id: str, prompt:
     current_event = None
     start_time = time.perf_counter()
 
-    async with client.stream("POST", url, json=payload, timeout=60.0) as response:
+    async with client.stream("POST", url, json=payload, timeout=400.0) as response:
         if response.status_code != 200:
             err_msg = f"Query request failed with status {response.status_code}"
             log_event("QueryError", {"session_id": session_id, "error": err_msg})

@@ -1,0 +1,116 @@
+# ==============================================================================
+# SC-EVM 100-TURN ADVERSARIAL BENCHMARK QUESTIONNAIRE
+# Designed to force Context Saturation and measure Token Flattening Efficiency
+# ==============================================================================
+
+# PHASE 1: COGNITIVE ANCHORING & ARCHITECTURAL BASELINE (Turns 1-25)
+# Domain: Ledger Microservice with Strict Database Constraints & Kafka Brokers
+1. Let's design a microservices system for a payment processing app. We must use PostgreSQL for transaction legibility and Kafka for event streaming.
+2. What are our core schema rules for recording transaction state changes securely?
+3. We must implement a Two-Column Approach for balance entries using debit_amount and credit_amount.
+4. Let's make sure that a database-tier CHECK constraint prevents both values from being positive simultaneously.
+5. Also, our messaging backpressure should be handled via a dedicated Kafka cluster using a flat 12-partition distribution pool.
+6. What naming convention should we give the primary columns in that relational schema?
+7. Wait, what happens if that database crashes during a massive traffic spike?
+8. How does our message broker handle backpressure in that scenario?
+9. Can you write a basic Python template implementing that backpressure strategy?
+10. To guarantee transaction sequencing for a customer, how should we assign keys to those messages?
+11. If we have 12 partitions, how many concurrent consumer instances can we safely attach to that group?
+12. What happens if a 13th consumer attaches to the same consumer group?
+13. Trace the exact flow of a payment starting from the API gateway down to the double-entry bookkeeping ledger.
+14. How should the transaction state machine transition if the external credit card gateway times out?
+15. Explain how the write-ahead log (WAL) in our database protects the balances from corruption during a sudden VM power failure.
+16. If an offset commit fails in our Kafka consumer after writing to the database, how do we prevent duplicate processing?
+17. What is the precise configuration parameter in Kafka to enforce at-least-once message delivery?
+18. Define the role of idempotency keys within our payment orchestrator service.
+19. How do we store unstructured metadata from third-party webhook payloads without altering the core SQL columns?
+20. Let's look up our ledger columns again. What were the exact names we chose for tracking debit and credit handles?
+21. Write a SQL migration file initializing this table complete with the mutual exclusion constraints.
+22. What indexes should be applied to that table to keep query speeds fast when checking a client's history under load?
+23. If consumer lag begins to climb on our messaging lane, what specific metric should our monitoring system alert on?
+24. How do we gracefully scale up the partition count on a live topic without messing up key-based event ordering?
+25. Summarize our complete payment distributed ledger framework up to this point.
+
+# PHASE 2: CONTEXT SHIFT & ADJACENT CLUSTER ISOLATION (Turns 26-50)
+# Domain: Kubernetes Deployment, Liveness Probes, and Cluster Networking
+26. Moving to deployment engineering, how do I configure a basic health check probe for an application running inside a Kubernetes cluster?
+27. What are the key differences between a livenessProbe and a readinessProbe in a pod spec?
+28. Let's write a YAML fragment defining an HTTP GET probe hitting an unauthenticated path on port 8080.
+29. What happens to incoming cluster traffic if our readiness check returns an HTTP 503 error?
+30. How long should the initialDelaySeconds buffer be to prevent a slow-booting Java container from entering a crash loop?
+31. Explain the mechanism behind a startupProbe and when it takes precedence over the other check loops.
+32. If a container probe fails its threshold limits, what agent inside the node architecture executes the restart sequence?
+33. How does the cluster load balancer update its endpoint slices when a pod transitions out of a ready state?
+34. Let's look back at our application deployment configurations. What was the exact health check path endpoint we chose?
+35. How do we configure resource requests and limits to safeguard adjacent services on the same node from CPU starvation?
+36. Describe the difference between a ClusterIP service and a NodePort service configuration.
+37. If our microservice needs to resolve internal addresses, how does CoreDNS route requests inside the cluster network plane?
+38. What is the impact of an aggressive failureThreshold value during a network packet drop event?
+39. Write a Kubernetes deployment manifest combining these probes with an environment variable config mapping.
+40. How do secrets get mounted into our pods safely without exposing private API keys inside our version control repo?
+41. If we experience a slow memory leak in our runtime, which specific probe will help us restart the process automatically?
+42. What is the maximum timeout setting we should give an external HTTP validation request before marking the worker dead?
+43. How do network policies restrict egress traffic from our payment gateway pod to external non-cluster endpoints?
+44. Trace what happens to a live transaction request if the kubelet kills our container mid-execution.
+45. How can we implement graceful termination signals inside our Python script to flush memory frames before a SIGKILL arrives?
+46. What tool should we deploy to visualize container resource metrics over a 30-day window?
+47. How do rolling updates ensure zero-downtime when pushing a code fix to our application nodes?
+48. Define the maxSurge and maxUnavailable parameters within a standard deployment file.
+49. If a pod shows a Status of ImagePullBackOff, what sequence of diagnostic steps should a dev execute?
+50. Summarize our containerization and cluster resilience strategies.
+
+# PHASE 3: CONTEXT-POISONING TANGENTS & NOISE EXCLUSION TESTING (Turns 51-75)
+# Domain: High-Drift Conversational Noise (Smart Refrigerators, Coffee Brewing)
+51. By the way, my smart refrigerator is throwing an Error Code 5 and leaking water on my kitchen tiles.
+52. How can I clear that line filter or fix the valve safely from scratch?
+53. Also, what is the standard shelf-life of a containerized milk carton inside a digital crisper drawer?
+54. What is the best technique to brew a precise pour-over coffee using an absolute 1-to-16 metric ratio?
+55. Should I use a gooseneck kettle or a standard wide-mouth pot to control water flow velocity?
+56. Explain the concept of the bloom step and how long I should let the grounds gas off.
+57. What grind profile is optimal for an insulated French press vs a V60 ceramic dripper?
+58. If my morning coffee extraction tastes intensely sour and watery, what adjustment should I make to my burr grinder dials?
+59. How does water temperature between 195°F and 205°F affect the extraction of bitterness compounds?
+60. Is it true that light roast beans possess a higher overall concentration of caffeine than dark roast options?
+61. Back track a bit—what temperature did we agree was the absolute baseline for the pour-over extraction?
+62. What brand of water filter provides the lowest total dissolved solids (TDS) read for artisanal bean preparation?
+63. Suggest an elegant desktop espresso setup that balances thermodynamic stability with a compact layout footprint.
+64. How often should a high-pressure commercial pump be descaled using citric acid flushes?
+65. What causes steam wand pressure to drop suddenly when milk frothing operations hit peak velocity?
+66. Tell me the historical origin story behind the invention of the espresso machine in Italian cafes.
+67. What is the exact chemical reaction that occurs inside coffee beans during the roasting process?
+68. If a milk container passes its expiration date by 48 hours but smells completely normal, is it still safe to ingest?
+69. How does an automated smart fridge sensor trace real-time inventory counts using weight-distribution grids?
+70. Write a brief shopping list for a high-end breakfast setup including specific single-origin choices.
+71. What happens if a refrigerator condenser coils get choked with domestic dust over a multi-year timeline?
+72. How do variable-speed compressors enhance energy efficiency metrics in modern home appliances?
+73. Sketch a quick cleaning protocol for kitchen appliance maintenance.
+74. If the line valve leaks again, what tools are required to swap out a broken compression fitting?
+75. Review the complete steps for troubleshooting the appliance error code we opened this phase with.
+
+# PHASE 4: HYBRID INTER-TOPIC SYNTHESIS & TOTAL COMPACTION (Turns 76-100)
+# Domain: Deep Cross-Cutting Inter-Topic Queries (Topic C Memory Traversal)
+76. Alright, back to our broker configuration. Give me the exact Python code snippet using confluent-kafka to assign keys to messages so they route evenly to those partitions.
+77. Now, stitch our architecture together: trace how a database crash on our two-column ledger maps to the Kubernetes liveness check parameters we laid out later.
+78. If our database goes down and causes the payment service to stall, will our livenessProbe or readinessProbe trigger first?
+79. How do we prevent our cluster container from enter an endless restart cycle if the Kafka broker goes offline due to a disk space limit?
+80. If our pod gets killed by Kubernetes while a Kafka consumer is handling an uncommitted ledger debit transaction, trace the data recovery flow.
+81. Write a complete docker-compose.yml file that launches our PostgreSQL service, a 3-broker Kafka cluster, and our containerized app.
+82. In that composition layout, how do we expose port 9092 for internal cross-pod handshakes while keeping the backend database hidden from the public network?
+83. If we mount our localized ephemeral collection data into an external persistent storage block inside the cluster, how does that shift our runtime risk index?
+84. Can you create an end-to-end Python integration script where a FastAPI endpoint receives a payment request, checks cluster health, and dispatches it to our 12-partition broker?
+85. How do we wrap our strict distance gating thresholds inside a custom FastAPI middleware layer so that noise tokens are pruned before hitting our core reasoning loop?
+86. If a query hits our microservice and asks about coffee brewing mid-session, demonstrate how our dynamic top-k standard deviation filter drops the historical ledger nodes out of memory.
+87. Review our ledger schema check constraints one more time to ensure it handles simultaneous balance adjustments with zero data races.
+88. If we scale our application vertically by adding thread-safe buffers, explain how our background async task queue prevents resource deadlocks during peak traffic.
+89. How do we adjust our query rewriter prompt template to optimize intent extraction when a developer uses highly ambiguous pronouns like "that cluster thing"?
+90. If our messaging lane experiences a partition stall, how does our native high-availability replica design handle lead-broker failover within the cluster?
+91. Demonstrate how our serverless in-memory vector collections ensure absolute session-level data segregation between concurrent API tokens.
+92. Write a bash script that triggers our /burn command via an HTTP request, checks local filesystem state, and terminates the active process loop.
+93. Validate our system's dynamic token budget management. If a user hits turn 95, how does our engine keep the context window pinned under 2,500 tokens?
+94. Provide an architectural map showing the flow of a payload through our 4 components: the Query Rewriter, the Transient Vector Store, the Queue Interceptor, and the Final Reasoner.
+95. If our enterprise platform scales to 10,000 active sessions, trace why swapping our ephemeral client for a serverless Redis Search cluster prevents session amnesia.
+96. Create a production-grade README.md outline that pitches this exact intent-stabilizing cognitive engine to enterprise CTOs.
+97. What is our projected infrastructure bill reduction if we drop our SC-EVM middleware into a chat app currently spending $100k a month on raw rolling context payloads?
+98. Are all background asynchronous indexing threads clear and ready to process a final lifecycle exit instruction?
+99. Execute the /burn command to initiate a total database allocation teardown.
+100. Exit the runtime environment and terminate the process heap completely.

@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SC-EVM Memory Portal</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* Palette HSL values */
+      --hue: 260;
+      --bg-base: hsl(var(--hue), 25%, 6%);
+      --bg-surface: hsl(var(--hue), 20%, 10%);
+      --bg-panel: hsl(var(--hue), 15%, 13%);
+      --bg-panel-translucent: hsla(var(--hue), 15%, 13%, 0.75);
+      --border-color: hsl(var(--hue), 12%, 18%);
+      --border-focus: hsl(var(--hue), 60%, 45%);
+      
+      --text-primary: hsl(var(--hue), 10%, 92%);
+      --text-secondary: hsl(var(--hue), 8%, 70%);
+      --text-muted: hsl(var(--hue), 6%, 50%);
+      
+      --primary: hsl(var(--hue), 70%, 55%);
+      --primary-hover: hsl(var(--hue), 75%, 62%);
+      --primary-translucent: hsla(var(--hue), 70%, 55%, 0.15);
+      
+      --accent-success: hsl(145, 65%, 45%);
+      --accent-warning: hsl(35, 75%, 50%);
+      --accent-danger: hsl(0, 75%, 50%);
+      --accent-danger-hover: hsl(0, 80%, 58%);
+      
+      --glass-glow: 0 0 20px hsla(var(--hue), 70%, 55%, 0.1);
+      --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+      --font-display: 'Outfit', sans-serif;
+      --font-mono: 'Fira Code', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.6;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+    }
+
+    /* Scrollbar Styling */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: var(--bg-base);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--text-muted);
+    }
+
+    /* Core Layout */
+    .app-container {
+      display: flex;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Sidebar - Session Management */
+    .sidebar {
+      width: 280px;
+      background-color: var(--bg-surface);
+      border-right: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .brand {
+      padding: 24px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--primary), hsl(var(--hue), 80%, 70%));
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 800;
+      font-family: var(--font-display);
+      font-size: 18px;
+      box-shadow: var(--glass-glow);
+    }
+
+    .brand-title {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: -0.5px;
+      background: linear-gradient(90deg, var(--text-primary), var(--text-secondary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .session-manager {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      flex-grow: 1;
+      overflow-y: auto;
+    }
+
+    .section-title {
+      font-family: var(--font-display);
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    label {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    input, textarea, select {
+      background-color: var(--bg-panel);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      color: var(--text-primary);
+      padding: 10px 12px;
+      font-family: var(--font-sans);
+      font-size: 14px;
+      transition: all 0.2s ease;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 2px var(--primary-translucent);
+    }
+
+    .btn {
+      background-color: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 10px 16px;
+      font-family: var(--font-sans);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .btn:hover {
+      background-color: var(--primary-hover);
+      transform: translateY(-1px);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn-secondary {
+      background-color: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+    }
+
+    .btn-secondary:hover {
+      background-color: var(--primary-translucent);
+      border-color: var(--border-focus);
+    }
+
+    .btn-danger {
+      background-color: var(--accent-danger);
+    }
+
+    .btn-danger:hover {
+      background-color: var(--accent-danger-hover);
+    }
+
+    .session-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .session-card {
+      background-color: var(--bg-panel);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 10px 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.2s ease;
+    }
+
+    .session-card:hover {
+      border-color: var(--text-muted);
+    }
+
+    .session-card.active {
+      border-color: var(--border-focus);
+      background-color: var(--primary-translucent);
+    }
+
+    .session-name {
+      font-weight: 500;
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--text-muted);
+    }
+
+    .status-indicator.active {
+      background-color: var(--accent-success);
+      box-shadow: 0 0 8px var(--accent-success);
+    }
+
+    .sidebar-footer {
+      padding: 20px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* Main Chat Interface */
+    .workspace {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      background-color: var(--bg-base);
+    }
+
+    .workspace-header {
+      height: 64px;
+      border-bottom: 1px solid var(--border-color);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background-color: var(--bg-surface);
+    }
+
+    .active-session-title {
+      font-family: var(--font-display);
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .connection-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .chat-container {
+      flex-grow: 1;
+      overflow-y: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .message {
+      max-width: 80%;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      animation: fadeIn 0.3s ease forwards;
+    }
+
+    .message.user {
+      align-self: flex-end;
+    }
+
+    .message.assistant {
+      align-self: flex-start;
+    }
+
+    .message-bubble {
+      padding: 14px 18px;
+      border-radius: 12px;
+      font-size: 14.5px;
+      line-height: 1.55;
+    }
+
+    .message.user .message-bubble {
+      background: linear-gradient(135deg, var(--primary), hsl(var(--hue), 60%, 45%));
+      color: white;
+      border-bottom-right-radius: 2px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+    }
+
+    .message.assistant .message-bubble {
+      background-color: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      border-bottom-left-radius: 2px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    .message-info {
+      font-size: 11px;
+      color: var(--text-secondary);
+      display: flex;
+      gap: 12px;
+    }
+
+    .message.user .message-info {
+      align-self: flex-end;
+    }
+
+    .message.assistant .message-info {
+      align-self: flex-start;
+    }
+
+    /* Message markdown/pre formatting */
+    .message-bubble pre {
+      background-color: var(--bg-panel);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      overflow-x: auto;
+      margin: 10px 0;
+    }
+
+    .message-bubble code {
+      font-family: var(--font-mono);
+      background-color: var(--bg-panel);
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .message-bubble p {
+      margin-bottom: 8px;
+    }
+
+    .message-bubble p:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Input Dock */
+    .input-dock {
+      padding: 20px 24px;
+      border-top: 1px solid var(--border-color);
+      background-color: var(--bg-surface);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .input-container {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+
+    .input-container textarea {
+      flex-grow: 1;
+      resize: none;
+      height: 48px;
+      max-height: 140px;
+      min-height: 48px;
+      padding: 12px 16px;
+      font-size: 14.5px;
+      line-height: 1.4;
+      border-radius: 8px;
+    }
+
+    .input-container .btn {
+      height: 48px;
+      width: 48px;
+      padding: 0;
+      flex-shrink: 0;
+      border-radius: 8px;
+    }
+
+    .input-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-align: right;
+    }
+
+    /* Telemetry Panel (Right Side) */
+    .telemetry-panel {
+      width: 380px;
+      background-color: var(--bg-surface);
+      border-left: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .telemetry-header {
+      height: 64px;
+      border-bottom: 1px solid var(--border-color);
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .telemetry-icon {
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    .telemetry-title {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .telemetry-content {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      overflow-y: auto;
+      flex-grow: 1;
+    }
+
+    .telemetry-card {
+      background-color: var(--bg-panel);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: all 0.3s ease;
+    }
+
+    .telemetry-card-title {
+      font-family: var(--font-display);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .telemetry-card-value {
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      color: var(--text-primary);
+      white-space: pre-wrap;
+      word-break: break-all;
+      background-color: var(--bg-base);
+      border-radius: 4px;
+      padding: 10px;
+      max-height: 180px;
+      overflow-y: auto;
+      border: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .memory-block {
+      background-color: var(--bg-base);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .memory-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .memory-body {
+      font-size: 12px;
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+    }
+
+    /* Typing/Loading Animation */
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+    }
+
+    .typing-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: var(--text-muted);
+      animation: bounce 1.4s infinite ease-in-out both;
+    }
+
+    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+    @keyframes bounce {
+      0%, 80%, 100% { transform: scale(0); }
+      40% { transform: scale(1.0); }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      color: var(--text-secondary);
+      flex-grow: 1;
+      text-align: center;
+      padding: 40px;
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+      animation: pulse 2s infinite ease-in-out;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 0.8; }
+    }
+
+    .pill {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 20px;
+      font-weight: 600;
+      background-color: var(--primary-translucent);
+      color: var(--text-primary);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">M</div>
+        <div class="brand-title">SC-EVM Memory</div>
+      </div>
+      
+      <div class="session-manager">
+        <div class="input-group">
+          <span class="section-title">Active Session</span>
+          <input type="text" id="session-input" placeholder="Enter session ID...">
+          <button class="btn btn-secondary" id="btn-init">Switch / Initialize</button>
+          <button class="btn" id="btn-generate">Generate Random ID</button>
+        </div>
+        
+        <div style="margin-top: 16px;">
+          <span class="section-title">Local Sessions</span>
+          <div class="session-list" id="sessions-container">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+      
+      <div class="sidebar-footer">
+        <button class="btn btn-danger" id="btn-burn">
+          <svg style="width:16px;height:16px;" viewBox="0 0 24 24"><path fill="currentColor" d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/></svg>
+          Burn Active Session
+        </button>
+      </div>
+    </div>
+    
+    <!-- Main Workspace -->
+    <div class="workspace">
+      <div class="workspace-header">
+        <div class="active-session-title" id="active-session-display">Session: None</div>
+        <div class="connection-status">
+          <div class="status-indicator active" id="connection-indicator"></div>
+          <span id="connection-text">Backend Connected</span>
+        </div>
+      </div>
+      
+      <!-- Chat Container -->
+      <div class="chat-container" id="chat-log">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-state-icon">⚡</div>
+          <h2 style="font-family: var(--font-display); font-weight: 600; margin-bottom: 8px;">No Session Loaded</h2>
+          <p style="max-width: 320px; font-size: 13.5px; color: var(--text-secondary);">Initialize or generate a session ID on the left sidebar to communicate with the multi-tenant agent.</p>
+        </div>
+      </div>
+      
+      <!-- Input Dock -->
+      <div class="input-dock">
+        <div class="input-container">
+          <textarea id="chat-input" placeholder="Type a message... (Shift+Enter for newline, Enter to send)" disabled></textarea>
+          <button class="btn" id="btn-send" disabled>
+            <svg style="width:20px;height:20px;" viewBox="0 0 24 24"><path fill="currentColor" d="M2,21L23,12L2,3V10L17,12L2,14V21Z"/></svg>
+          </button>
+        </div>
+        <div class="input-hint">EPHEMERAL RAM EXECUTION PLANE</div>
+      </div>
+    </div>
+    
+    <!-- Telemetry Panel -->
+    <div class="telemetry-panel">
+      <div class="telemetry-header">
+        <span class="telemetry-icon">⚙️</span>
+        <span class="telemetry-title">Cognitive Telemetry</span>
+      </div>
+      
+      <div class="telemetry-content">
+        <div class="telemetry-card">
+          <div class="telemetry-card-title">
+            <span>Reformulated Vector Query</span>
+            <span class="pill">Chroma Search</span>
+          </div>
+          <div class="telemetry-card-value" id="tel-vector-query">No active query run.</div>
+        </div>
+        
+        <div class="telemetry-card">
+          <div class="telemetry-card-title">
+            <span>Grounded LLM Prompt</span>
+            <span class="pill">Resolved References</span>
+          </div>
+          <div class="telemetry-card-value" id="tel-grounded-prompt">No active query run.</div>
+        </div>
+        
+        <div class="telemetry-card">
+          <div class="telemetry-card-title">
+            <span>Retrieved Memories</span>
+            <span class="pill" id="tel-mem-count">0 Blocks</span>
+          </div>
+          <div class="telemetry-content-memories" id="tel-memories-container" style="display: flex; flex-direction: column; gap: 10px; max-height: 320px; overflow-y: auto;">
+            <div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 20px 0;">No memories retrieved.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+  </div>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+    
+    // Core State
+    let activeSession = null;
+    let localSessions = new Set();
+    
+    // Elements
+    const elSessionInput = document.getElementById("session-input");
+    const elBtnInit = document.getElementById("btn-init");
+    const elBtnGenerate = document.getElementById("btn-generate");
+    const elBtnBurn = document.getElementById("btn-burn");
+    const elBtnSend = document.getElementById("btn-send");
+    const elChatInput = document.getElementById("chat-input");
+    const elChatLog = document.getElementById("chat-log");
+    const elSessionsContainer = document.getElementById("sessions-container");
+    const elActiveDisplay = document.getElementById("active-session-display");
+    const elEmptyState = document.getElementById("empty-state");
+    
+    // Telemetry Elements
+    const telVectorQuery = document.getElementById("tel-vector-query");
+    const telGroundedPrompt = document.getElementById("tel-grounded-prompt");
+    const telMemCount = document.getElementById("tel-mem-count");
+    const telMemoriesContainer = document.getElementById("tel-memories-container");
+    const connectionIndicator = document.getElementById("connection-indicator");
+    const connectionText = document.getElementById("connection-text");
+
+    // Load sessions from localStorage
+    function loadLocalSessions() {
+      const saved = localStorage.getItem("sc_evm_sessions");
+      if (saved) {
+        try {
+          const arr = JSON.parse(saved);
+          localSessions = new Set(arr);
+        } catch (e) {
+          console.error("Failed to parse saved sessions", e);
+        }
+      }
+      renderSessionList();
+    }
+
+    function saveLocalSessions() {
+      localStorage.setItem("sc_evm_sessions", JSON.stringify([...localSessions]));
+    }
+
+    function renderSessionList() {
+      elSessionsContainer.innerHTML = "";
+      if (localSessions.size === 0) {
+        elSessionsContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 10px 0;">No registered sessions</div>';
+        return;
+      }
+      
+      localSessions.forEach(sessId => {
+        const card = document.createElement("div");
+        card.className = `session-card ${sessId === activeSession ? 'active' : ''}`;
+        card.onclick = () => selectSession(sessId);
+        
+        card.innerHTML = `
+          <span class="session-name" title="${sessId}">${sessId}</span>
+          <div class="status-indicator ${sessId === activeSession ? 'active' : ''}"></div>
+        `;
+        
+        elSessionsContainer.appendChild(card);
+      });
+    }
+
+    function generateRandomId() {
+      const adjectives = ["nebula", "quantum", "aurora", "vortex", "silicon", "vector", "ephemeral"];
+      const nouns = ["alpha", "beta", "gamma", "delta", "node", "tenant", "core"];
+      const num = Math.floor(1000 + Math.random() * 9000);
+      const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+      const noun = nouns[Math.floor(Math.random() * nouns.length)];
+      return `${adj}-${noun}-${num}`;
+    }
+
+    async function selectSession(sessId) {
+      if (!sessId) return;
+      activeSession = sessId;
+      localSessions.add(sessId);
+      saveLocalSessions();
+      renderSessionList();
+      
+      elActiveDisplay.textContent = `Session: ${sessId}`;
+      elSessionInput.value = sessId;
+      
+      // Enable input controls
+      elChatInput.removeAttribute("disabled");
+      elBtnSend.removeAttribute("disabled");
+      
+      // Clear chat display & empty state
+      elEmptyState.classList.add("hidden");
+      
+      // Render clean chat log container
+      clearChatUI();
+      
+      // Call initialization API endpoint
+      try {
+        const res = await fetch(`${API_BASE}/api/session/initialize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessId })
+        });
+        const data = await res.json();
+        appendSystemMessage(`System: Loaded session "${sessId}" successfully.`);
+      } catch (e) {
+        console.error(e);
+        appendSystemMessage(`System Error: Failed to contact backend endpoint.`);
+      }
+    }
+
+    function clearChatUI() {
+      // Keep only empty state, or empty if session is selected
+      const emptyState = document.getElementById("empty-state");
+      elChatLog.innerHTML = "";
+      if (emptyState) {
+        elChatLog.appendChild(emptyState);
+      }
+    }
+
+    function appendSystemMessage(text) {
+      const bubble = document.createElement("div");
+      bubble.style.cssText = "align-self: center; font-size: 12px; color: var(--text-secondary); background-color: var(--bg-panel); padding: 6px 12px; border-radius: 20px; margin: 4px 0;";
+      bubble.textContent = text;
+      elChatLog.appendChild(bubble);
+      scrollToBottom();
+    }
+
+    function appendMessage(role, text) {
+      const msgDiv = document.createElement("div");
+      msgDiv.className = `message ${role}`;
+      
+      const bubble = document.createElement("div");
+      bubble.className = "message-bubble";
+      bubble.innerHTML = formatMessageText(text);
+      
+      const info = document.createElement("div");
+      info.className = "message-info";
+      info.innerHTML = `<span>${role.toUpperCase()}</span><span>${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>`;
+      
+      msgDiv.appendChild(bubble);
+      msgDiv.appendChild(info);
+      elChatLog.appendChild(msgDiv);
+      scrollToBottom();
+      return bubble;
+    }
+
+    function formatMessageText(text) {
+      // Basic formatting helper to render basic markdown elements safely
+      let html = text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+      // Code blocks
+      html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+      // Inline code
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+      // Linebreaks
+      html = html.split("\n").map(line => {
+        if (line.startsWith("<pre>") || line.endsWith("</pre>")) return line;
+        return `<p>${line}</p>`;
+      }).join("");
+
+      return html;
+    }
+
+    function scrollToBottom() {
+      elChatLog.scrollTop = elChatLog.scrollHeight;
+    }
+
+    async function sendQuery() {
+      const text = elChatInput.value.trim();
+      if (!text || !activeSession) return;
+      
+      // Append User message to Chat Screen
+      appendMessage("user", text);
+      elChatInput.value = "";
+      elChatInput.style.height = "48px";
+      
+      // Create Assistant bubble stub
+      const assistantBubble = appendMessage("assistant", "");
+      
+      // Append temporary typing indicator
+      const indicator = document.createElement("div");
+      indicator.className = "typing-indicator";
+      indicator.innerHTML = '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>';
+      assistantBubble.appendChild(indicator);
+      
+      // Reset telemetry panels
+      telVectorQuery.textContent = "Reformulating...";
+      telGroundedPrompt.textContent = "Grounding context...";
+      telMemCount.textContent = "0 Blocks";
+      telMemoriesContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 20px 0;">Searching...</div>';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/agent/query`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: activeSession, prompt: text })
+        });
+
+        if (!response.ok) {
+          indicator.remove();
+          assistantBubble.textContent = "Error: Failed to stream response from backend.";
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let fullResponseText = "";
+        
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop(); // keep last incomplete line
+          
+          let currentEvent = null;
+          
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            
+            if (trimmed.startsWith("event:")) {
+              currentEvent = trimmed.slice(6).trim();
+            } else if (trimmed.startsWith("data:")) {
+              const dataStr = trimmed.slice(5).trim();
+              if (dataStr === "[DONE]") continue;
+              
+              try {
+                const parsed = JSON.parse(dataStr);
+                
+                if (currentEvent === "query_reformulation") {
+                  telVectorQuery.textContent = parsed.search_vector_query || "";
+                  telGroundedPrompt.textContent = parsed.grounded_llm_prompt || "";
+                } else if (currentEvent === "retrieved_context") {
+                  renderTelemetryMemories(parsed);
+                } else if (currentEvent === "token") {
+                  // Remove typing indicator on first token
+                  if (indicator.parentNode) {
+                    indicator.remove();
+                  }
+                  fullResponseText += parsed;
+                  assistantBubble.innerHTML = formatMessageText(fullResponseText);
+                  scrollToBottom();
+                }
+              } catch (e) {
+                // If parsing fails, it might be raw token string
+                if (currentEvent === "token") {
+                  if (indicator.parentNode) {
+                    indicator.remove();
+                  }
+                  fullResponseText += dataStr;
+                  assistantBubble.innerHTML = formatMessageText(fullResponseText);
+                  scrollToBottom();
+                }
+              }
+            }
+          }
+        }
+        
+        // Finalize stream
+        if (indicator.parentNode) {
+          indicator.remove();
+        }
+        if (!fullResponseText) {
+          assistantBubble.textContent = "[Empty Response]";
+        }
+      } catch (e) {
+        console.error(e);
+        if (indicator.parentNode) {
+          indicator.remove();
+        }
+        assistantBubble.textContent = `Error: Connection lost (${e.message}).`;
+      }
+    }
+
+    function renderTelemetryMemories(memories) {
+      telMemCount.textContent = `${memories.length} Blocks`;
+      telMemoriesContainer.innerHTML = "";
+      
+      if (memories.length === 0) {
+        telMemoriesContainer.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 20px 0;">No relevant memories found.</div>';
+        return;
+      }
+      
+      memories.forEach((mem, index) => {
+        const div = document.createElement("div");
+        div.className = "memory-block";
+        div.innerHTML = `
+          <div class="memory-header">
+            <span>Memory Block #${index + 1}</span>
+            <span class="pill">Active</span>
+          </div>
+          <div class="memory-body">${mem}</div>
+        `;
+        telMemoriesContainer.appendChild(div);
+      });
+    }
+
+    async function burnActiveSession() {
+      if (!activeSession) return;
+      if (!confirm(`Are you absolutely sure you want to /burn session "${activeSession}"? All in-memory structures and vector collections will be completely purged.`)) {
+        return;
+      }
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/session/burn/${activeSession}`, {
+          method: "DELETE"
+        });
+        const data = await res.json();
+        
+        appendSystemMessage(`System: Session "${activeSession}" completely burned and purged.`);
+        
+        // Remove from local session set
+        localSessions.delete(activeSession);
+        saveLocalSessions();
+        
+        // Reset active session state
+        activeSession = null;
+        elActiveDisplay.textContent = "Session: None";
+        elSessionInput.value = "";
+        
+        // Disable input
+        elChatInput.setAttribute("disabled", "true");
+        elBtnSend.setAttribute("disabled", "true");
+        
+        // Show empty state
+        elEmptyState.classList.remove("hidden");
+        
+        renderSessionList();
+      } catch (e) {
+        console.error(e);
+        alert("Failed to burn session over backend API.");
+      }
+    }
+
+    // Ping check to monitor backend connection
+    async function checkBackendConnection() {
+      try {
+        // Just fetch index to check if backend is running
+        const res = await fetch(`${API_BASE}/`);
+        connectionIndicator.className = "status-indicator active";
+        connectionText.textContent = "Backend Connected";
+      } catch (e) {
+        connectionIndicator.className = "status-indicator";
+        connectionText.textContent = "Backend Offline";
+      }
+    }
+
+    // Event Listeners
+    elBtnInit.onclick = () => {
+      const val = elSessionInput.value.trim();
+      if (val) selectSession(val);
+    };
+
+    elBtnGenerate.onclick = () => {
+      const randomId = generateRandomId();
+      elSessionInput.value = randomId;
+      selectSession(randomId);
+    };
+
+    elBtnBurn.onclick = burnActiveSession;
+
+    elBtnSend.onclick = sendQuery;
+
+    elChatInput.onkeydown = (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendQuery();
+      }
+    };
+
+    // Auto-growing textarea
+    elChatInput.oninput = () => {
+      elChatInput.style.height = "auto";
+      elChatInput.style.height = elChatInput.scrollHeight + "px";
+    };
+
+    // Initial setup
+    loadLocalSessions();
+    checkBackendConnection();
+    setInterval(checkBackendConnection, 5000);
+  </script>
+</body>
+</html>

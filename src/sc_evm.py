@@ -1,8 +1,13 @@
 import math
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
+from src.clients import NVIDIA_NIM_Client
+import json
 
 class SCEVMEngine:
     """Pure logic calculation engine for query reformulation and confidence gating calculations."""
+
+    def __init__(self, client: Optional[NVIDIA_NIM_Client] = None):
+        self.client = client or NVIDIA_NIM_Client()
 
     @staticmethod
     def reformulate_query(current_input: str, history: List[Dict[str, str]]) -> str:
@@ -18,6 +23,36 @@ class SCEVMEngine:
         
         history_str = "\n".join(formatted_turns)
         return f"Conversation History:\n{history_str}\n\nCurrent User Prompt: {current_input}"
+
+    async def run_query_reformulation_async(self, current_input: str, history: List[Dict[str, str]]) -> Tuple[str, str]:
+        """Runs the query reformulation LLM call using NVIDIA NIM Qwen model."""
+        REWRITE_SYSTEM_PROMPT = """You are a cognitive query orchestration layer.
+Given a conversation history sliding window and a new user prompt, you must perform two tasks:
+1. Generate a dense, keyword-heavy string optimized for vector database similarity search.
+2. Generate an expanded, fully explicit version of the user prompt where all pronouns, ambiguous references, and fragmented context links are fully resolved into clear architectural entities.
+
+You must return your output strictly as a valid raw JSON object with two keys: "search_vector_query" and "grounded_llm_prompt". Do not wrap it in markdown code blocks.
+"""
+        compiled_prompt = self.reformulate_query(current_input, history)
+        try:
+            response_text = await self.client.call_llm_async(
+                model_key="kimi",
+                prompt=compiled_prompt,
+                system_prompt=REWRITE_SYSTEM_PROMPT
+            )
+            text_clean = response_text.strip()
+            if text_clean.startswith("```json"):
+                text_clean = text_clean[7:]
+            if text_clean.endswith("```"):
+                text_clean = text_clean[:-3]
+            text_clean = text_clean.strip()
+            result_json = json.loads(text_clean)
+            return (
+                result_json.get("search_vector_query", current_input),
+                result_json.get("grounded_llm_prompt", current_input)
+            )
+        except Exception:
+            return current_input, current_input
 
     @staticmethod
     def calculate_dual_anchor_gating(

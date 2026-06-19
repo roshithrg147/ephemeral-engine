@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from src.main import app
 
 # --- Configuration Bounds ---
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "http://127.0.0.1:8081"
 REPORT_FILE = "sc_evm_validation_report.json"
 execution_log = []
 
@@ -86,7 +86,7 @@ async def run_torture_test():
     log_event("TestStart", "Initiating SC-EVM verification harness")
     
     # 1. Start Programmatic Uvicorn Server in background task
-    config = uvicorn.Config(app, host="127.0.0.1", port=8000, log_level="warning")
+    config = uvicorn.Config(app, host="127.0.0.1", port=8081, log_level="warning")
     server = BackgroundUvicornServer(config)
     server_task = asyncio.create_task(run_server(server))
 
@@ -170,7 +170,7 @@ async def run_torture_test():
     final_report = {
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "overall_status": "SUCCESS" if all([a["passed"] for a in assertions]) else "FAILED",
-        "port_configured": 8000,
+        "port_configured": 8081,
         "session_a_id": session_a,
         "session_b_id": session_b,
         "assertions": assertions,
