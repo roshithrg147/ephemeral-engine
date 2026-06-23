@@ -915,6 +915,7 @@
         const decoder = new TextDecoder();
         let buffer = "";
         let fullResponseText = "";
+        let currentEvent = null;
         
         while (true) {
           const { value, done } = await reader.read();
@@ -924,16 +925,18 @@
           const lines = buffer.split("\n");
           buffer = lines.pop(); // keep last incomplete line
           
-          let currentEvent = null;
-          
           for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed) continue;
             
             if (trimmed.startsWith("event:")) {
               currentEvent = trimmed.slice(6).trim();
+              if (!window.debugEvents) window.debugEvents = [];
+              window.debugEvents.push({ type: 'event', val: currentEvent });
             } else if (trimmed.startsWith("data:")) {
               const dataStr = trimmed.slice(5).trim();
+              if (!window.debugEvents) window.debugEvents = [];
+              window.debugEvents.push({ type: 'data', val: dataStr, currentEvent: currentEvent });
               if (dataStr === "[DONE]") continue;
               
               try {

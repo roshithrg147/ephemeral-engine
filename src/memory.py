@@ -229,42 +229,51 @@ class MultiTenantSessionRegistry:
     """
     def __init__(self):
         self._sessions: Dict[str, SessionRecord] = {}
-        self.locks: defaultdict[str, SessionLock] = defaultdict(SessionLock)
-        self._locks = self.locks  # Maintain compatibility
+        self._locks: Dict[str, asyncio.Lock] = {}
         self._global_lock: asyncio.Lock = asyncio.Lock()
 
-    async def get_session_lock(self, session_id: str) -> SessionLock:
+    async def get_session_lock(self, session_id: str) -> asyncio.Lock:
         """
         Retrieves or initializes an atomic lock bound exclusively to the tenant session context.
         """
-        return self.locks[session_id]
+        async with self._global_lock:
+            if session_id not in self._locks:
+                self._locks[session_id] = asyncio.Lock()
+            return self._locks[session_id]
 
     async def initialize_session(self, session_id: str) -> SessionRecord:
         """
         Dynamically initializes an isolated, memory-confined session profile for a user.
         Uses exclusive write lock.
         """
-        async with self.locks[session_id]:
-            if session_id not in self._sessions:
-                self._sessions[session_id] = SessionRecord(session_id)
+        lock = await self.get_session_lock(session_id)
+        async with lock:
+            async with self._global_lock:
+                if session_id not in self._sessions:
+                    self._sessions[session_id] = SessionRecord(session_id)
             return self._sessions[session_id]
 
     async def get_session(self, session_id: str) -> Optional[SessionRecord]:
         """
         Fetches an existing session profile without forcing side-effect mutations.
-        Uses concurrent read lock.
+        Uses exclusive lock to ensure safe read.
         """
-        async with self.locks[session_id].read_lock():
-            return self._sessions.get(session_id)
+        lock = await self.get_session_lock(session_id)
+        async with lock:
+            async with self._global_lock:
+                return self._sessions.get(session_id)
 
     async def append_message(self, session_id: str, role: str, content: str) -> None:
         """
         Appends a verified conversation log directly to the tenant's history buffer.
         Uses exclusive write lock.
         """
-        async with self.locks[session_id]:
-            if session_id in self._sessions:
-                self._sessions[session_id].chat_history.append({"role": role, "content": content})
+        lock = await self.get_session_lock(session_id)
+        async with lock:
+            async with self._global_lock:
+                session = self._sessions.get(session_id)
+            if session:
+                session.chat_history.append({"role": role, "content": content})
             else:
                 raise KeyError(f"Session state context uninitialized: {session_id}")
 
@@ -274,7 +283,8 @@ class MultiTenantSessionRegistry:
         Wipes the ephemeral client allocation completely.
         Uses exclusive write lock.
         """
-        async with self.locks[session_id]:
+        lock = await self.get_session_lock(session_id)
+        async with lock:
             async with self._global_lock:
                 if session_id in self._sessions:
                     # Wipe memory structures explicitly
@@ -285,8 +295,8 @@ class MultiTenantSessionRegistry:
                         logger.warning(f"Error purging vector space for session {session_id}: {e}")
 
                     del self._sessions[session_id]
-                    if session_id in self.locks:
-                        del self.locks[session_id]
+                    if session_id in self._locks:
+                        del self._locks[session_id]
                     logger.info(f"Programmatic /burn executed successfully. Purged space for: {session_id}")
                     return True
                 return False

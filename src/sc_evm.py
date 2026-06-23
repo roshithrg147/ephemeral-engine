@@ -98,7 +98,7 @@ You must return your output strictly as a valid raw JSON object with two keys: "
         *,
         base_threshold: float = 0.52,
         absolute_ceiling: float = 0.48,
-        absolute_floor: float = 0.40,
+        absolute_floor: float = 0.38,
         neighboring_delta_limit: float = 0.12,
         top_anchor_delta_limit: float = 0.18
     ) -> List[str]:
@@ -136,7 +136,7 @@ You must return your output strictly as a valid raw JSON object with two keys: "
 
                     # Run core gated validation logic
                     _, passes_gate = SCEVMEngine.calculate_dual_anchor_gating(
-                        query_vector,
+                        emb,
                         matched_embs[0],  # Anchor A
                         matched_embs[-1], # Anchor B
                         base_threshold=base_threshold
