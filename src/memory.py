@@ -279,8 +279,8 @@ class MultiTenantSessionRegistry:
 
     async def flush_session(self, session_id: str) -> bool:
         """
-        Forces a physical memory purge of the isolated session record.
-        Wipes the ephemeral client allocation completely.
+        Removes application access to the isolated session record and deletes
+        its ephemeral collection. This does not guarantee physical RAM erasure.
         Uses exclusive write lock.
         """
         lock = await self.get_session_lock(session_id)

@@ -1,7 +1,7 @@
 [project]
 name = "ephemeral-engine"
 version = "0.1.0"
-description = "A terminal-based personal assistant powered by Vertex AI Gemini and Claude with dual-memory."
+description = "Session-isolated context-control middleware for multi-turn AI applications."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
