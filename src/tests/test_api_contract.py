@@ -1,0 +1,41 @@
+import asyncio
+
+import httpx
+
+from src.main import app
+
+
+def test_session_lifecycle_and_validation():
+    async def exercise():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            invalid = await client.post("/api/session/initialize", json={"session_id": "../escape"})
+            assert invalid.status_code == 422
+
+            initialized = await client.post(
+                "/api/session/initialize",
+                json={"session_id": "api-contract"},
+            )
+            assert initialized.status_code == 200
+
+            invalid_role = await client.post(
+                "/api/session/message",
+                json={"session_id": "api-contract", "role": "tool", "content": "not allowed"},
+            )
+            assert invalid_role.status_code == 422
+
+            appended = await client.post(
+                "/api/session/message",
+                json={"session_id": "api-contract", "role": "user", "content": "hello"},
+            )
+            assert appended.status_code == 200
+
+            history = await client.get("/api/session/history/api-contract")
+            assert history.status_code == 200
+            assert history.json()["data"] == [{"role": "user", "content": "hello"}]
+
+            burned = await client.delete("/api/session/burn/api-contract")
+            assert burned.status_code == 200
+            assert (await client.get("/api/session/history/api-contract")).status_code == 404
+
+    asyncio.run(exercise())

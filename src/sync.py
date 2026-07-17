@@ -1,16 +1,21 @@
-import os
-import json
-import time
-import threading
-import logging
 import base64
+import json
+import logging
+import os
+import platform
+import threading
+import time
+
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = os.environ.get("MYCLIPBOARD_CONFIG_PATH", os.path.expanduser("~/.config/anthropic-agent/config.json"))
+CONFIG_PATH = os.environ.get(
+    "MYCLIPBOARD_CONFIG_PATH", os.path.expanduser("~/.config/anthropic-agent/config.json")
+)
+
 
 class SyncService:
     def __init__(self, update_queue):
@@ -18,7 +23,7 @@ class SyncService:
         self.enabled = False
         self.secret_key = None
         self._cipher = None
-        self.device_id = os.uname().nodename
+        self.device_id = platform.node()
         self.last_sync_time = 0
         self._running = False
         self._sync_thread = None
@@ -32,7 +37,7 @@ class SyncService:
         config = {}
         if os.path.exists(CONFIG_PATH):
             try:
-                with open(CONFIG_PATH, "r") as f:
+                with open(CONFIG_PATH) as f:
                     config = json.load(f)
                     salt_hex = config.get("sync_salt")
                     if salt_hex:
@@ -49,7 +54,7 @@ class SyncService:
                     json.dump(config, f, indent=4)
             except Exception as e:
                 logger.error(f"Failed to save new salt to config: {e}")
-        
+
         return salt
 
     def set_config(self, enabled, secret_key):
@@ -73,14 +78,15 @@ class SyncService:
         else:
             self._cipher = None
             self.status = "Disconnected"
-        
+
         if self.enabled and not self._running:
             self.start()
         elif not self.enabled and self._running:
             self.stop()
 
     def start(self):
-        if self._running: return
+        if self._running:
+            return
         self._running = True
         self._sync_thread = threading.Thread(target=self._periodic_pull, daemon=True)
         self._sync_thread.start()
@@ -95,10 +101,10 @@ class SyncService:
         def _async_push():
             try:
                 encrypted_data = self._cipher.encrypt(text.encode())
-                payload = {
+                _payload = {
                     "device_id": self.device_id,
                     "blob": encrypted_data.decode(),
-                    "timestamp": time.time()
+                    "timestamp": time.time(),
                 }
                 # BYOB (Bring Your Own Backend) Integration Point
                 # requests.post(self.relay_url, json=payload, timeout=5)
@@ -123,7 +129,7 @@ class SyncService:
                 except Exception as e:
                     logger.error(f"Sync Pull Error: {e}")
                     self.status = "Error"
-            time.sleep(30) # Pull every 30 seconds
+            time.sleep(30)  # Pull every 30 seconds
 
     def get_status(self):
         return self.status

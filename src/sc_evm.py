@@ -1,124 +1,138 @@
-import math
-from typing import List, Dict, Tuple, Optional
-from src.clients import NVIDIA_NIM_Client
+import asyncio
 import json
+import logging
+import math
+from typing import Any
+
+from src.config import settings
+from src.services.model_connector import ModelConnector
+from src.services.prompt_manager import PromptManager
+from src.services.response_parsing import strip_code_fences
+
 
 class SCEVMEngine:
     """Pure logic calculation engine for query reformulation and confidence gating calculations."""
 
-    def __init__(self, client: Optional[NVIDIA_NIM_Client] = None):
-        self.client = client or NVIDIA_NIM_Client()
+    def __init__(
+        self,
+        model_connector: ModelConnector | None = None,
+        prompt_manager: PromptManager | None = None,
+    ):
+        self.model_connector = model_connector or ModelConnector()
+        self.prompt_manager = prompt_manager or PromptManager()
 
-    @staticmethod
-    def reformulate_query(current_input: str, history: List[Dict[str, str]]) -> str:
+    def reformulate_query(self, current_input: str, history: list[dict[str, str]]) -> str:
         """Cleanly compiles a sliding historical turn window to fix potential conversational blindness."""
-        # Retrieve a sliding window of the last 6 messages (3 full turns)
-        history_window = history[-6:]
-        formatted_turns = []
-        for turn in history_window:
-            role = turn.get("role", "user")
-            content = turn.get("content", "")
-            role_label = "User" if role == "user" else "Assistant"
-            formatted_turns.append(f"{role_label}: {content}")
-        
-        history_str = "\n".join(formatted_turns)
-        return f"Conversation History:\n{history_str}\n\nCurrent User Prompt: {current_input}"
+        return self.prompt_manager.build_rewrite_prompt(current_input, history)
 
-    async def run_query_reformulation_async(self, current_input: str, history: List[Dict[str, str]]) -> Tuple[str, str]:
+    async def run_query_reformulation_async(
+        self,
+        current_input: str,
+        history: list[dict[str, str]],
+    ) -> tuple[str, str, dict[str, Any] | None]:
         """Runs the query reformulation LLM call using NVIDIA NIM Qwen model."""
-        REWRITE_SYSTEM_PROMPT = """You are a cognitive query orchestration layer.
-Given a conversation history sliding window and a new user prompt, you must perform two tasks:
-1. Generate a dense, keyword-heavy string optimized for vector database similarity search.
-2. Generate an expanded, fully explicit version of the user prompt where all pronouns, ambiguous references, and fragmented context links are fully resolved into clear architectural entities.
-
-You must return your output strictly as a valid raw JSON object with two keys: "search_vector_query" and "grounded_llm_prompt". Do not wrap it in markdown code blocks.
-"""
+        # Reformulation logic uses prompt from prompt_manager
         compiled_prompt = self.reformulate_query(current_input, history)
         try:
-            response_text = await self.client.call_llm_async(
+            response_text = await self.model_connector.call_async(
                 model_key="kimi",
                 prompt=compiled_prompt,
-                system_prompt=REWRITE_SYSTEM_PROMPT
+                system_prompt=self.prompt_manager.REWRITE_SYSTEM_PROMPT,
+                max_tokens=512,
             )
-            text_clean = response_text.strip()
-            if text_clean.startswith("```json"):
-                text_clean = text_clean[7:]
-            if text_clean.endswith("```"):
-                text_clean = text_clean[:-3]
-            text_clean = text_clean.strip()
-            result_json = json.loads(text_clean)
-            return (
-                result_json.get("search_vector_query", current_input),
-                result_json.get("grounded_llm_prompt", current_input)
+            text_clean = strip_code_fences(response_text)
+            usage = getattr(response_text, "usage", None)
+
+            if not text_clean:
+                return current_input, current_input, usage
+
+            try:
+                result_json = json.loads(text_clean)
+                return (
+                    result_json.get("search_vector_query", current_input),
+                    result_json.get("grounded_llm_prompt", current_input),
+                    usage,
+                )
+            except json.JSONDecodeError:
+                logging.getLogger("SC-EVM.Error").error(
+                    f"JSON Decode Error on reformulation string: {text_clean}"
+                )
+                return current_input, current_input, usage
+
+        except Exception as e:
+            logging.getLogger("SC-EVM.Error").error(
+                f"Query reformulation failed: {e}", exc_info=True
             )
-        except Exception:
-            return current_input, current_input
+            return current_input, current_input, None
+
+    @staticmethod
+    def cosine_similarity(a: list[float], b: list[float]) -> float:
+        """Compute the mathematical cosine similarity between two vectors."""
+        mag_a = math.sqrt(sum(x * x for x in a))
+        mag_b = math.sqrt(sum(x * x for x in b))
+        if mag_a < 1e-9 or mag_b < 1e-9:
+            return 0.0
+        dot = sum(x * y for x, y in zip(a, b, strict=True))
+        return dot / (mag_a * mag_b)
+
+    @staticmethod
+    def cosine_distance(a: list[float], b: list[float]) -> float:
+        """Compute the mathematical cosine distance between two vectors."""
+        return 1.0 - SCEVMEngine.cosine_similarity(a, b)
 
     @staticmethod
     def calculate_dual_anchor_gating(
-        query_vector: List[float],
-        anchor_a: List[float],
-        anchor_b: List[float],
-        base_threshold: float = 0.72
-    ) -> Tuple[float, bool]:
-        """Compute the mathematical cosine similarity against dual tracking anchor targets to establish structural confidence gating.
-        
+        query_vector: list[float],
+        anchor_a: list[float],
+        anchor_b: list[float],
+        maximum_admitted_anchor_distance: float = 0.48,
+    ) -> tuple[float, bool]:
+        """Compute the mathematical cosine distance against dual tracking anchor targets to establish structural confidence gating.
+
         Includes standard safe vector-magnitude verification boundaries to isolate against divide-by-zero errors.
         """
-        # Calculate Euclidean norms (magnitudes)
-        mag_q = math.sqrt(sum(x * x for x in query_vector))
-        mag_a = math.sqrt(sum(x * x for x in anchor_a))
-        mag_b = math.sqrt(sum(x * x for x in anchor_b))
+        dist_a = SCEVMEngine.cosine_distance(query_vector, anchor_a)
+        dist_b = SCEVMEngine.cosine_distance(query_vector, anchor_b)
 
-        # Safe vector-magnitude verification boundaries to isolate against divide-by-zero errors
-        if mag_q < 1e-9 or mag_a < 1e-9 or mag_b < 1e-9:
-            return 0.0, False
+        min_distance = min(dist_a, dist_b)
+        passes_gate = min_distance <= maximum_admitted_anchor_distance
 
-        # Calculate dot products
-        dot_a = sum(q * a for q, a in zip(query_vector, anchor_a))
-        dot_b = sum(q * b for q, b in zip(query_vector, anchor_b))
-
-        # Calculate cosine similarities
-        sim_a = dot_a / (mag_q * mag_a)
-        sim_b = dot_b / (mag_q * mag_b)
-
-        # Establish structural confidence gating:
-        # Determine the maximum similarity against dual anchors
-        max_similarity = max(sim_a, sim_b)
-        passes_gate = max_similarity >= base_threshold
-
-        return max_similarity, passes_gate
+        return min_distance, passes_gate
 
     @staticmethod
     def filter_documents_via_gating(
-        query_vector: List[float],
-        documents: List[str],
-        distances: List[float],
-        embeddings: List[List[float]],
+        query_vector: list[float],
+        documents: list[str],
+        distances: list[float],
+        embeddings: list[list[float]],
         *,
-        base_threshold: float = 0.52,
-        absolute_ceiling: float = 0.48,
-        absolute_floor: float = 0.38,
+        base_threshold: float = 0.52,  # Represents maximum_admitted_distance
+        absolute_ceiling: float = 0.48,  # Represents maximum_admitted_distance ceiling
+        absolute_floor: float = 0.38,  # Represents maximum_admitted_distance floor
         neighboring_delta_limit: float = 0.12,
-        top_anchor_delta_limit: float = 0.18
-    ) -> List[str]:
+        top_anchor_delta_limit: float = 0.18,
+    ) -> list[str]:
         """Filters retrieved documents through the dual-anchor gating rules.
-        
+
         Uses floor, ceiling, and neighbor delta limits to prevent irrelevant context creep.
+        All inputs and logic operate on cosine_distance.
         """
         if not documents:
             return []
 
-        matched_docs: List[str] = []
-        matched_dists: List[float] = []
-        matched_embs: List[List[float]] = []
+        # We treat base_threshold as the calibrated maximum admitted cosine distance
+        maximum_admitted_distance = base_threshold
+
+        matched_docs: list[str] = []
+        matched_dists: list[float] = []
+        matched_embs: list[list[float]] = []
 
         top_dist = distances[0]
         # Absolute ceiling exclusion check (dist > absolute_ceiling -> rejected)
         if top_dist > absolute_ceiling:
             return []
 
-        for doc, dist, emb in zip(documents, distances, embeddings):
+        for doc, dist, emb in zip(documents, distances, embeddings, strict=True):
             if dist > absolute_ceiling:
                 continue
 
@@ -134,14 +148,18 @@ You must return your output strictly as a valid raw JSON object with two keys: "
                     neighboring_delta = dist - prev_accepted_dist
                     top_anchor_delta = dist - top_dist
 
-                    # Run core gated validation logic
+                    # Run core gated validation logic using cosine_distance
                     _, passes_gate = SCEVMEngine.calculate_dual_anchor_gating(
                         emb,
                         matched_embs[0],  # Anchor A
-                        matched_embs[-1], # Anchor B
-                        base_threshold=base_threshold
+                        matched_embs[-1],  # Anchor B
+                        maximum_admitted_anchor_distance=maximum_admitted_distance,
                     )
-                    if passes_gate and neighboring_delta <= neighboring_delta_limit and top_anchor_delta <= top_anchor_delta_limit:
+                    if (
+                        passes_gate
+                        and neighboring_delta <= neighboring_delta_limit
+                        and top_anchor_delta <= top_anchor_delta_limit
+                    ):
                         matched_docs.append(doc)
                         matched_dists.append(dist)
                         matched_embs.append(emb)
@@ -152,3 +170,137 @@ You must return your output strictly as a valid raw JSON object with two keys: "
                     matched_embs.append(emb)
 
         return matched_docs
+
+    async def evaluate_query_context(
+        self,
+        query_vector: list[float],
+        collection: Any,
+        session_id: str,
+        base_threshold: float,
+        entity_id: str,
+        graphify_enabled: bool = True,
+    ) -> str:
+        """
+        Executes Vector DB search and Graphify lookup in parallel using asyncio.gather.
+        Fuses the retrieved context blocks into a single string payload.
+        """
+        import shutil
+
+        from src.graphify_bridge import get_structural_context
+
+        def do_vector_search() -> list[str]:
+            try:
+                results = collection.query(
+                    query_embeddings=[query_vector],
+                    n_results=3,
+                    where={"session_id": session_id},
+                    include=["documents", "distances", "embeddings"],
+                )
+                if results and "documents" in results and results["documents"]:
+                    docs = results["documents"][0]
+                    distances = (
+                        results["distances"][0] if "distances" in results else [0.0] * len(docs)
+                    )
+                    embeddings = (
+                        results["embeddings"][0] if "embeddings" in results else [[]] * len(docs)
+                    )
+
+                    return self.filter_documents_via_gating(
+                        query_vector=query_vector,
+                        documents=docs,
+                        distances=distances,
+                        embeddings=embeddings,
+                        base_threshold=base_threshold,
+                    )
+            except Exception as e:
+                logging.getLogger("SC-EVM.Error").error(
+                    f"Vector DB lookup failed: {e}", exc_info=True
+                )
+            return []
+
+        def do_graph_lookup() -> str:
+            if not graphify_enabled:
+                return ""
+            if not shutil.which("graphify"):
+                logger = logging.getLogger("SC-EVM.Graphify")
+                logger.info("Graphify CLI not found; skipping structural context retrieval.")
+                return ""
+            return get_structural_context(entity_id)
+
+        # Run both DB queries concurrently in worker threads.
+        vector_task = asyncio.to_thread(do_vector_search)
+        graph_task = asyncio.to_thread(do_graph_lookup)
+
+        vector_docs, graph_context = await asyncio.gather(vector_task, graph_task)
+
+        # Context Fusion
+        fused_context = []
+        if graph_context:
+            fused_context.append(f"<graphify_context>\n{graph_context}\n</graphify_context>")
+
+        for doc in vector_docs:
+            fused_context.append(f"<retrieved_memory>\n{doc}\n</retrieved_memory>")
+
+        return "\n\n".join(fused_context)
+
+    @staticmethod
+    def check_phase_gate(
+        current_phase: int | None, action_type: str, action_payload: dict[str, Any] | None = None
+    ) -> bool:
+        """
+        Enforces strict phase-gating to prevent premature code generation.
+        Validates the action against the current phase.
+        """
+        import logging
+
+        if current_phase is None:
+            current_phase = settings.DEVELOPMENT_PHASE
+
+        # PHASES: 0=INIT, 1=DATABASE_DESIGN, 2=BACKEND_READY, 3=UI_READY
+
+        if action_type == "none" or action_type == "update_memory":
+            return True
+
+        if action_type == "save_file" and action_payload:
+            file_path = action_payload.get("file_path", "").lower()
+
+            # Identify UI code by extensions or path
+            is_ui_code = (
+                any(
+                    file_path.endswith(ext)
+                    for ext in [".js", ".jsx", ".ts", ".tsx", ".css", ".html"]
+                )
+                or "frontend" in file_path
+                or "dashboard" in file_path
+            )
+
+            # Identify DB/Backend code
+            is_backend = (
+                any(file_path.endswith(ext) for ext in [".py"])
+                or "backend" in file_path
+                or "api" in file_path
+            )
+
+            if is_ui_code and current_phase < 3:
+                logging.getLogger("SC-EVM.Gate").warning(
+                    f"Phase-gate blocked UI code generation for '{file_path}' in phase {current_phase}"
+                )
+                return False
+
+            if is_backend and current_phase < 2:
+                # Assuming phase 1 is database, phase 2 is backend logic.
+                logging.getLogger("SC-EVM.Gate").warning(
+                    f"Phase-gate blocked Backend code generation for '{file_path}' in phase {current_phase}"
+                )
+                return False
+
+        # For run_command, we might want to prevent npm start if UI is not ready, etc.
+        if action_type == "run_command" and action_payload:
+            cmd = action_payload.get("command", "").lower()
+            if ("npm" in cmd or "npx" in cmd or "react" in cmd) and current_phase < 3:
+                logging.getLogger("SC-EVM.Gate").warning(
+                    f"Phase-gate blocked UI command '{cmd}' in phase {current_phase}"
+                )
+                return False
+
+        return True

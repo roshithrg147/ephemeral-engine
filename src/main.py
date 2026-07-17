@@ -1,121 +1,155 @@
-import os
-import json
 import asyncio
-from typing import Dict, List, Any, Optional, AsyncIterator
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import StreamingResponse, HTMLResponse
-from fastapi.middleware.cors import CORSMiddleware
+import concurrent.futures
+import json
+import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Annotated, Any, Literal
+
+from fastapi import FastAPI, HTTPException, Path
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from src.memory import session_registry
+from src.agent import AgentOrchestrator
+from src.config import settings
+from src.memory import session_registry, warm_memory_runtime
 from src.sc_evm import SCEVMEngine
-from src.clients import NVIDIA_NIM_Client
+from src.services.error_handlers import GlobalExceptionHandler
+from src.services.model_connector import ModelConnector
+from src.services.prompt_manager import PromptManager
+from src.services.session_runtime import (
+    await_background_tasks,
+    build_memory_snapshot,
+    commit_remembered_facts,
+    create_tracked_task,
+    embed_text,
+    get_indexed_documents,
+    index_interaction,
+)
+from src.telemetry_sink import log_error
 
 # Instantiate a global instance of SCEVMEngine containing the NVIDIA client
 sc_evm_engine = SCEVMEngine()
+prompt_manager = PromptManager()
+logger = logging.getLogger("SC-EVM.API")
 
-class SessionMemoryAdapter:
-    """Adapts a session record to the MemoryManager interface required by AgentOrchestrator."""
-    def __init__(self, record):
-        self.record = record
-        
-    def get_short_term_history(self) -> List[Dict[str, str]]:
-        return self.record.chat_history
-        
-    def add_interaction(self, user_message: str, assistant_response: str) -> None:
-        # Avoid duplicate history appending since sse_query_generator handles it
-        pass
-        
-    def add_fact(self, fact: str) -> bool:
-        facts = self.record.metadata_registry.setdefault("learned_facts", [])
-        if any(f.lower() == fact.lower() for f in facts):
-            return False
-        facts.append(fact)
-        return True
-        
-    def get_long_term_context(self) -> str:
-        facts = self.record.metadata_registry.get("learned_facts", [])
-        parts = []
-        if facts:
-            parts.append("Learned Facts about User:")
-            for f in facts:
-                parts.append(f"- {f}")
-        return "\n".join(parts) + "\n"
-
-_ORCHESTRATOR: Optional[Any] = None
+_ORCHESTRATOR: Any | None = None
 _ORCHESTRATOR_LOCK: asyncio.Lock = asyncio.Lock()
+_ORCHESTRATION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=settings.MAX_WORKER_THREADS,
+    thread_name_prefix="sc-evm-orchestration",
+)
 
-async def get_orchestrator(memory_manager) -> Any:
+
+async def run_orchestrator(orchestrator: AgentOrchestrator, memory_snapshot: Any, prompt: str):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _ORCHESTRATION_EXECUTOR,
+        orchestrator.generate_response,
+        memory_snapshot,
+        prompt,
+    )
+
+
+async def get_orchestrator() -> AgentOrchestrator:
     global _ORCHESTRATOR
     if _ORCHESTRATOR is None:
         async with _ORCHESTRATOR_LOCK:
             if _ORCHESTRATOR is None:
-                from src.agent import AgentOrchestrator
-                _ORCHESTRATOR = AgentOrchestrator(memory_manager)
-            else:
-                _ORCHESTRATOR.memory = memory_manager
-    else:
-        _ORCHESTRATOR.memory = memory_manager
+                _ORCHESTRATOR = AgentOrchestrator(model_connector=ModelConnector())
     return _ORCHESTRATOR
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan event manager to verify connection on startup."""
-    print("[Diagnostic] Verifying local NVIDIA API key configuration...")
-    key = os.getenv("NVIDIA_API_KEY")
+    """Lifespan event manager for startup diagnostics and graceful shutdown."""
+    logger.info("Verifying local NVIDIA API key configuration...")
+    key = settings.NVIDIA_API_KEY or settings.NVIDIA_API_KEY_KIWI or settings.NVIDIA_API_KEY_QWEN
     if key:
-        print("[Diagnostic] Local NVIDIA connection verification: SUCCESSFUL.")
+        logger.info("Local NVIDIA connection verification: SUCCESSFUL.")
     else:
-        print("[Diagnostic] Local NVIDIA connection verification: FAILED (API Key missing).")
-    yield
+        logger.warning("Local NVIDIA connection verification: FAILED (API Key missing).")
+    logger.info("Warming local memory runtime...")
+    await asyncio.to_thread(warm_memory_runtime)
+    await session_registry.start_daemons()
+    try:
+        yield
+    finally:
+        await session_registry.stop_daemons()
+        await await_background_tasks()
+        from src.clients import NVIDIA_NIM_Client
 
-app = FastAPI(
-    title="State-Cached Ephemeral Vector Memory (SC-EVM) Microservice",
-    lifespan=lifespan
-)
+        await NVIDIA_NIM_Client.aclose()
+        logger.info("SC-EVM shutdown complete.")
+
+
+app = FastAPI(title="State-Cached Ephemeral Vector Memory (SC-EVM) Microservice", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.get("/", response_class=HTMLResponse)
-async def get_ui():
-    """Serves the premium single-file HTML/CSS/JS Chat interface."""
-    html_path = os.path.join(os.path.dirname(__file__), "index.html")
-    if not os.path.exists(html_path):
-        html_path = "index.html"
-    try:
-        with open(html_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        return HTMLResponse(content=content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"UI file not found: {str(e)}")
+app.add_exception_handler(Exception, GlobalExceptionHandler.handle)
+
+
+@app.get("/")
+async def get_health():
+    """Health check endpoint for the SC-EVM backend."""
+    return {"status": "online", "message": "SC-EVM Backend Engine Running"}
+
 
 # --- Ingestion Contracts / Schemas ---
 
+SessionId = Annotated[
+    str,
+    Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"),
+]
+PromptText = Annotated[str, Field(min_length=1, max_length=100_000)]
+
+
 class SessionInitRequest(BaseModel):
-    session_id: str
+    session_id: SessionId
+
 
 class ChatMessageInput(BaseModel):
-    session_id: str
-    role: str
-    content: str
+    session_id: SessionId
+    role: Literal["user", "assistant", "system"]
+    content: PromptText
+
 
 class ExecutionQueryRequest(BaseModel):
-    session_id: str
-    prompt: str
+    session_id: SessionId
+    prompt: PromptText
+    graphify_enabled: bool = True
+    diagnostic_mode: bool = False
+
 
 class StandardResponseEnvelope(BaseModel):
     status: str
     message: str
-    data: Optional[Any] = None
+    data: Any | None = None
+
 
 # --- Network Interface Controllers ---
+
+
+@app.get("/api/session/list", response_model=StandardResponseEnvelope)
+async def list_sessions() -> StandardResponseEnvelope:
+    """Retrieves a list of all active session IDs."""
+    try:
+        session_ids = session_registry.list_session_ids()
+        return StandardResponseEnvelope(
+            status="success", message="Sessions listed successfully", data=session_ids
+        )
+    except Exception as e:
+        logger.exception("Failed to list sessions")
+        raise HTTPException(status_code=500, detail="Failed to list sessions") from e
+
 
 @app.post("/api/session/initialize", response_model=StandardResponseEnvelope)
 async def initialize_session(body: SessionInitRequest) -> StandardResponseEnvelope:
@@ -123,11 +157,12 @@ async def initialize_session(body: SessionInitRequest) -> StandardResponseEnvelo
     try:
         await session_registry.initialize_session(body.session_id)
         return StandardResponseEnvelope(
-            status="success",
-            message=f"Session {body.session_id} initialized successfully"
+            status="success", message=f"Session {body.session_id} initialized successfully"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to initialize session: {str(e)}")
+        logger.exception("Failed to initialize session", extra={"session_id": body.session_id})
+        raise HTTPException(status_code=500, detail="Failed to initialize session") from e
+
 
 @app.post("/api/session/message", response_model=StandardResponseEnvelope)
 async def append_message(body: ChatMessageInput) -> StandardResponseEnvelope:
@@ -135,56 +170,76 @@ async def append_message(body: ChatMessageInput) -> StandardResponseEnvelope:
     try:
         await session_registry.append_message(body.session_id, body.role, body.content)
         return StandardResponseEnvelope(
-            status="success",
-            message="Message successfully appended to session history"
+            status="success", message="Message successfully appended to session history"
         )
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail="Session not found") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to append message: {str(e)}")
+        logger.exception("Failed to append message", extra={"session_id": body.session_id})
+        raise HTTPException(status_code=500, detail="Failed to append message") from e
+
 
 @app.delete("/api/session/burn/{session_id}", response_model=StandardResponseEnvelope)
-async def burn_session(session_id: str) -> StandardResponseEnvelope:
+async def burn_session(
+    session_id: Annotated[
+        str, Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    ],
+) -> StandardResponseEnvelope:
     """Completely purges the volatile RAM footprint and ChromaDB collection for a session."""
     try:
         await session_registry.flush_session(session_id)
         return StandardResponseEnvelope(
-            status="success",
-            message=f"Session {session_id} successfully flushed from memory"
+            status="success", message=f"Session {session_id} successfully flushed from memory"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to flush session: {str(e)}")
+        logger.exception("Failed to flush session", extra={"session_id": session_id})
+        raise HTTPException(status_code=500, detail="Failed to flush session") from e
+
 
 @app.get("/api/session/history/{session_id}", response_model=StandardResponseEnvelope)
-async def get_session_history(session_id: str) -> StandardResponseEnvelope:
+async def get_session_history(
+    session_id: Annotated[
+        str, Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    ],
+) -> StandardResponseEnvelope:
     """Retrieves conversation history for a specific session ID."""
     try:
         record = await session_registry.get_session(session_id)
         if not record:
-            return StandardResponseEnvelope(status="success", message="Session not found", data=[])
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
         return StandardResponseEnvelope(
-            status="success",
-            message="History retrieved successfully",
-            data=record.chat_history
+            status="success", message="History retrieved successfully", data=record.chat_history
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve history: {str(e)}")
+        logger.exception("Failed to retrieve history", extra={"session_id": session_id})
+        raise HTTPException(status_code=500, detail="Failed to retrieve history") from e
+
 
 @app.get("/api/session/memory/{session_id}", response_model=StandardResponseEnvelope)
-async def get_session_memory(session_id: str) -> StandardResponseEnvelope:
+async def get_session_memory(
+    session_id: Annotated[
+        str, Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    ],
+) -> StandardResponseEnvelope:
     """Retrieves index contents and metadata registry for a session."""
     try:
         record = await session_registry.get_session(session_id)
         if not record:
-            return StandardResponseEnvelope(status="success", message="Session not found", data={})
-        
-        # Get documents from ChromaDB collection
-        docs = []
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
         try:
-            res = record.collection.get(where={"session_id": session_id})
-            if res and "documents" in res:
-                docs = res["documents"]
-        except Exception:
-            pass
-            
+            docs = await get_indexed_documents(record, session_id)
+        except Exception as e:
+            logger.error(
+                "Failed to fetch indexed documents from collection",
+                extra={"session_id": session_id},
+                exc_info=True,
+            )
+            log_error("api.session_memory.collection_get", str(e))
+            docs = []
+
         return StandardResponseEnvelope(
             status="success",
             message="Memory data retrieved successfully",
@@ -192,184 +247,323 @@ async def get_session_memory(session_id: str) -> StandardResponseEnvelope:
                 "pending_commit_buffer": record.metadata_registry.get("pending_commit_buffer", []),
                 "base_threshold": record.metadata_registry.get("base_threshold", 0.52),
                 "token_budget": record.metadata_registry.get("token_budget", 2500),
-                "indexed_documents": docs
-            }
+                "indexed_documents": docs,
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to retrieve memory", extra={"session_id": session_id})
+        raise HTTPException(status_code=500, detail="Failed to retrieve memory") from e
+
+
+async def sse_query_generator(
+    session_id: str, prompt: str, graphify_enabled: bool = True, diagnostic_mode: bool = False
+) -> AsyncIterator[str]:
+    """Generates server-sent events for query reformulation, context retrieval, and response content streams."""
+    async with session_registry.session_operation(session_id, create=True) as record:
+        async for event in _sse_query_generator_locked(
+            record,
+            session_id,
+            prompt,
+            graphify_enabled,
+            diagnostic_mode,
+        ):
+            yield event
+
+
+async def _sse_query_generator_locked(
+    record: Any,
+    session_id: str,
+    prompt: str,
+    graphify_enabled: bool,
+    diagnostic_mode: bool,
+) -> AsyncIterator[str]:
+    """Run one complete query while the session lifecycle lock is held."""
+    history = list(record.chat_history)
+    memory_snapshot = build_memory_snapshot(record)
+    memory_anchors = record.metadata_registry.get(
+        "learned_facts", []
+    ) + record.metadata_registry.get("pending_commit_buffer", [])
+    pending_mems = list(record.metadata_registry.get("pending_commit_buffer", []))
+    base_threshold = record.metadata_registry.get("base_threshold", 0.52)
+
+    try:
+        docs = await get_indexed_documents(record, session_id)
+    except Exception as e:
+        logger.error(
+            "Failed to fetch metadata documents from collection",
+            extra={"session_id": session_id},
+            exc_info=True,
+        )
+        log_error("api.sse.metadata_collection_get", str(e))
+        docs = []
+    tokens_saved = sum(len(d) // 4 for d in docs) * 2
+
+    yield f"event: metadata\ndata: {json.dumps({'tokensSaved': tokens_saved, 'memoryAnchors': memory_anchors})}\n\n"
+
+    # 2. Query Reformulation using NVIDIA NIM Qwen model
+    rewrite_usage = None
+    try:
+        reformulation_res = await sc_evm_engine.run_query_reformulation_async(prompt, history)
+        if len(reformulation_res) == 3:
+            search_vector_query, grounded_llm_prompt, rewrite_usage = reformulation_res
+        else:
+            search_vector_query, grounded_llm_prompt = reformulation_res
+            rewrite_usage = None
+    except Exception as e:
+        logger.error(
+            "Query reformulation failed; falling back to raw prompt",
+            extra={"session_id": session_id},
+            exc_info=True,
+        )
+        log_error("api.sse.query_reformulation", str(e))
+        search_vector_query = prompt
+        grounded_llm_prompt = prompt
+
+    yield f"event: query_reformulation\ndata: {json.dumps({'search_vector_query': search_vector_query, 'grounded_llm_prompt': grounded_llm_prompt})}\n\n"
+
+    # 3. Retrieve Context & Apply Parallel Context Fusion
+    context_str = ""
+    try:
+        # Generate query vector locally using the session's ONNX embedding function
+        query_vector = await embed_text(record, search_vector_query)
+
+        # Evaluate context using parallel retrieval from Vector DB and Graphify
+        context_str = await sc_evm_engine.evaluate_query_context(
+            query_vector=query_vector,
+            collection=record.collection,
+            session_id=session_id,
+            base_threshold=base_threshold,
+            entity_id=search_vector_query,
+            graphify_enabled=graphify_enabled,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve memory: {str(e)}")
+        logger.error(
+            "Parallel context retrieval failed",
+            extra={"session_id": session_id},
+            exc_info=True,
+        )
+        log_error("api.sse.context_retrieval", str(e))
 
+    if settings.DIAGNOSTIC_MODE or diagnostic_mode:
+        yield f"event: retrieved_context\ndata: {json.dumps([context_str])}\n\n"
 
+    # 4. Synthesize context blocks and execute primary reasoning stream
+    context_list = []
+    if context_str:
+        context_list.append(context_str)
 
+    # Merge volatile in-memory buffer interceptors (mapped to metadata_registry keys)
+    for pending in pending_mems:
+        context_list.append(
+            f"<retrieved_memory>\n[Pending Active Queue Context (Unindexed)]:\n{pending}\n</retrieved_memory>"
+        )
 
+    context_str = "\n\n".join(context_list)
 
-async def sse_query_generator(session_id: str, prompt: str) -> AsyncIterator[str]:
-    """Generates server-sent events for query reformulation, context retrieval, and response token streams."""
-    # 1. Initialize/Retrieve session registration record
-    record = await session_registry.initialize_session(session_id)
-    session_lock = await session_registry.get_session_lock(session_id)
-    async with session_lock:
-        history = list(record.chat_history)
+    # 4. Invoke Dual-LLM Agent Orchestrator to generate response and actions
+    orchestrator = await get_orchestrator()
 
-        # 2. Query Reformulation using NVIDIA NIM Qwen model
-        try:
-            search_vector_query, grounded_llm_prompt = await sc_evm_engine.run_query_reformulation_async(prompt, history)
-        except Exception:
-            search_vector_query = prompt
-            grounded_llm_prompt = prompt
+    # Build augmented prompt for the orchestrator, passing SC-EVM context
+    augmented_prompt = prompt_manager.build_augmented_prompt(
+        context_str=context_str, grounded_llm_prompt=grounded_llm_prompt
+    )
 
-        yield f"event: query_reformulation\ndata: {json.dumps({'search_vector_query': search_vector_query, 'grounded_llm_prompt': grounded_llm_prompt})}\n\n"
+    full_response_text = ""
+    action_payload = {"type": "none"}
+    refined_response = None
+    generation_succeeded = False
 
-        # 3. Retrieve Context & Apply Cosine Similarity Gating
-        retrieved_context: List[str] = []
-        try:
-            # Generate query vector locally using the session's ONNX embedding function
-            query_vector = record.embedding_fn([search_vector_query])[0]
+    try:
+        refined_response = await run_orchestrator(orchestrator, memory_snapshot, augmented_prompt)
+        commit_remembered_facts(record, refined_response.remember)
 
-            # Perform query in the session's in-memory ChromaDB collection
-            collection = record.collection
-            results = collection.query(
-                query_embeddings=[query_vector],
-                n_results=3,
-                where={"session_id": session_id},
-                include=["documents", "distances", "embeddings"]
+        full_response_text = refined_response.text
+        generation_succeeded = True
+
+        # Format action payload
+        action_payload = _build_action_payload(refined_response.action)
+        if action_payload:
+            full_response_text, action_type, payload = _apply_phase_gate(
+                record,
+                full_response_text,
+                action_payload["type"],
+                action_payload["payload"],
             )
 
-            if results and "documents" in results and results["documents"]:
-                docs = results["documents"][0]
-                distances = results["distances"][0] if "distances" in results else [0.0] * len(docs)
-                embeddings = results["embeddings"][0] if "embeddings" in results else [[]] * len(docs)
+            action_payload = {"type": action_type, "payload": payload}
 
-                # Fetch baseline threshold dynamically from metadata_registry
-                base_threshold = record.metadata_registry.get("base_threshold", 0.52)
+        # Staged response delivery: Yield the complete staged response content in a single event without delay
+        yield f"event: response_content\ndata: {json.dumps(full_response_text)}\n\n"
 
-                retrieved_context = SCEVMEngine.filter_documents_via_gating(
-                    query_vector=query_vector,
-                    documents=docs,
-                    distances=distances,
-                    embeddings=embeddings,
-                    base_threshold=base_threshold
-                )
-        except Exception:
-            pass
+        # Yield action payload over SSE
+        yield f"event: action\ndata: {json.dumps(action_payload)}\n\n"
 
-        yield f"event: retrieved_context\ndata: {json.dumps(retrieved_context)}\n\n"
+        # Compile and yield the detailed cost accounting usage report
+        from src.clients import get_model_price
 
-        # 4. Synthesize context blocks and execute primary reasoning stream
-        context_list = [f"<retrieved_memory>\n{doc}\n</retrieved_memory>" for doc in retrieved_context]
-        
-        # Merge volatile in-memory buffer interceptors (mapped to metadata_registry keys)
-        pending_mems = record.metadata_registry.get("pending_commit_buffer", [])
-        for pending in pending_mems:
-            context_list.append(f"<retrieved_memory>\n[Pending Active Queue Context (Unindexed)]:\n{pending}\n</retrieved_memory>")
-            
-        context_str = "\n\n".join(context_list)
-        
-        # 4. Invoke Dual-LLM Agent Orchestrator to generate response and actions
-        adapter = SessionMemoryAdapter(record)
-        orchestrator = await get_orchestrator(adapter)
-        
-        # Build augmented prompt for the orchestrator, passing SC-EVM context
-        augmented_prompt = f"--- RETRIEVED MEMORY CONTEXT ---\n{context_str}\n\n--- CURRENT USER PROMPT ---\n{grounded_llm_prompt}"
-        
-        full_response_text = ""
-        action_payload = {"type": "none"}
-        
-        try:
-            loop = asyncio.get_running_loop()
-            # Run AgentOrchestrator's synchronous parallel queries inside a thread pool
-            refined_response = await loop.run_in_executor(
-                None, orchestrator.generate_response, augmented_prompt
-            )
-            
-            full_response_text = refined_response.text
-            
-            # Format action payload
-            if refined_response.action:
-                action_payload = {
-                    "type": refined_response.action.type,
-                    "payload": {
-                        "command": refined_response.action.payload.command if refined_response.action.payload else None,
-                        "prompt": refined_response.action.payload.prompt if refined_response.action.payload else None,
-                        "file_path": refined_response.action.payload.file_path if refined_response.action.payload else None,
-                        "file_content": refined_response.action.payload.file_content if refined_response.action.payload else None,
-                    }
+        rewrite_record = []
+        if rewrite_usage:
+            rewrite_record.append(
+                {
+                    "measurement_type": "exact",
+                    "provider": "nvidia",
+                    "model": settings.MODEL_2_CORE,
+                    "tokenizer": None,
+                    "input_tokens": rewrite_usage.get("prompt_tokens"),
+                    "output_tokens": rewrite_usage.get("completion_tokens"),
+                    "cached_tokens": None,
+                    "retry_usage": None,
+                    "missing_reason": None,
+                    "price_table_version": "v1.0",
+                    "calculated_cost": (rewrite_usage.get("prompt_tokens", 0) / 1000.0)
+                    * get_model_price(settings.MODEL_2_CORE)["input_1k"]
+                    + (rewrite_usage.get("completion_tokens", 0) / 1000.0)
+                    * get_model_price(settings.MODEL_2_CORE)["output_1k"],
                 }
-            
-            # Simulate real-time word-by-word streaming for TUI/Web SSE rendering
-            words = full_response_text.split(" ")
-            for i, word in enumerate(words):
-                spaced_word = word + (" " if i < len(words) - 1 else "")
-                yield f"event: token\ndata: {json.dumps(spaced_word)}\n\n"
-                await asyncio.sleep(0.015)
-                
-            # Yield action payload over SSE
-            yield f"event: action\ndata: {json.dumps(action_payload)}\n\n"
-            
-        except Exception as e:
-            yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
+            )
+        else:
+            rewrite_record.append(
+                {
+                    "measurement_type": "estimate",
+                    "provider": "nvidia",
+                    "model": settings.MODEL_2_CORE,
+                    "tokenizer": None,
+                    "input_tokens": len(prompt) // 4,
+                    "output_tokens": len(search_vector_query + grounded_llm_prompt) // 4,
+                    "cached_tokens": None,
+                    "retry_usage": None,
+                    "missing_reason": "exact usage not returned by provider",
+                    "price_table_version": "v1.0",
+                    "calculated_cost": None,
+                }
+            )
 
-        yield "event: done\ndata: [DONE]\n\n"
+        usage_report = rewrite_record + (
+            refined_response.usage_records
+            if refined_response and refined_response.usage_records
+            else []
+        )
+        yield f"event: usage_report\ndata: {json.dumps(usage_report)}\n\n"
 
-        # 5. Synchronize memory dialogue state
-        record.chat_history.append({"role": "user", "content": prompt})
-        record.chat_history.append({"role": "assistant", "content": full_response_text})
-        # Slide dialogue window to prevent context death spiral (cap at last 6 messages / 3 turns)
-        while len(record.chat_history) > 6:
-            record.chat_history.pop(0)
+        # Yield legacy token usage estimates for backward compatibility
+        m1_tokens = (len(prompt) + len(search_vector_query) + len(grounded_llm_prompt)) // 4 + 150
+        m2_tokens = (len(augmented_prompt) + len(full_response_text)) // 4 + 250
+        yield f"event: token_usage\ndata: {json.dumps({'m1': m1_tokens, 'm2': m2_tokens})}\n\n"
 
-        # 6. Non-blocking asynchronous vector database ingestion task allocation
-        index_chunk = f"User: {prompt}\nAssistant: {full_response_text}"
-        async def background_indexing():
-            try:
-                vector = record.embedding_fn([index_chunk])[0]
-                import uuid
-                import time
-                doc_id = str(uuid.uuid4())
-                record.collection.add(
-                    ids=[doc_id],
-                    embeddings=[vector],
-                    documents=[index_chunk],
-                    metadatas=[{"timestamp": int(time.time()), "session_id": session_id}]
-                )
-            except Exception:
-                pass
+        # Yield intent for analytics
+        if refined_response:
+            yield f"event: intent\ndata: {json.dumps(refined_response.intent)}\n\n"
 
-        asyncio.create_task(background_indexing())
+    except Exception as e:
+        logger.error(
+            "Agent response generation failed",
+            extra={"session_id": session_id},
+            exc_info=True,
+        )
+        log_error("api.sse.agent_generation", str(e))
+        yield f"event: error\ndata: {json.dumps('Response generation failed')}\n\n"
+
+    yield "event: done\ndata: [DONE]\n\n"
+
+    # 5. Synchronize memory dialogue state
+    if not generation_succeeded:
+        return
+    record.chat_history.append({"role": "user", "content": prompt})
+    record.chat_history.append({"role": "assistant", "content": full_response_text})
+    while len(record.chat_history) > settings.MAX_HISTORY_TURNS:
+        record.chat_history.pop(0)
+    record.refresh_manifest()
+
+    # 6. Non-blocking asynchronous vector database ingestion task allocation
+    index_chunk = f"User: {prompt}\nAssistant: {full_response_text}"
+    create_tracked_task(index_interaction(record, session_id, index_chunk))
 
 
 @app.post("/api/agent/query")
 async def agent_query(body: ExecutionQueryRequest) -> StreamingResponse:
     """Evaluates query routing, updates registers, and yields Server-Sent Events."""
     return StreamingResponse(
-        sse_query_generator(body.session_id, body.prompt),
-        media_type="text/event-stream"
+        sse_query_generator(
+            body.session_id, body.prompt, body.graphify_enabled, body.diagnostic_mode
+        ),
+        media_type="text/event-stream",
     )
 
+
 class DualLLMRequest(BaseModel):
-    session_id: str
-    prompt: str
+    session_id: SessionId
+    prompt: PromptText
+
+
+def _build_action_payload(action: Any) -> dict[str, Any] | None:
+    if not action:
+        return None
+
+    payload = None
+    if action.payload:
+        payload = {
+            "command": action.payload.command,
+            "prompt": action.payload.prompt,
+            "file_path": action.payload.file_path,
+            "file_content": action.payload.file_content,
+        }
+
+    return {
+        "type": action.type,
+        "payload": payload,
+    }
+
+
+def _apply_phase_gate(
+    record: Any,
+    response_text: str,
+    action_type: str,
+    payload: dict[str, Any] | None,
+) -> tuple[str, str, dict[str, Any] | None]:
+    current_phase = record.metadata_registry.get("development_phase")
+    if sc_evm_engine.check_phase_gate(current_phase, action_type, payload):
+        return response_text, action_type, payload
+
+    response_text += (
+        "\n\n[SYSTEM: Action blocked by Phase Gate (Not ready for this stage of development)]"
+    )
+    return response_text, "none", None
+
 
 @app.post("/api/dual-llm/process")
 async def dual_llm_process(body: DualLLMRequest) -> StandardResponseEnvelope:
     """Directly triggers the Dual-LLM Orchestrator reasoning pass."""
     try:
-        # Re-initialize/Retrieve session
-        record = await session_registry.initialize_session(body.session_id)
-        from src.agent import SessionMemoryAdapter
-        adapter = SessionMemoryAdapter(record)
-        orchestrator = await get_orchestrator(adapter)
-        
-        # Execute orchestrator pass
-        result = orchestrator.generate_response(body.prompt)
-        
-        return StandardResponseEnvelope(
-            status="success",
-            message="Dual-LLM pass complete",
-            data={
-                "text": result.text,
-                "intent": result.intent,
-                "action": result.action.dict() if result.action else None
-            }
-        )
+        async with session_registry.session_operation(body.session_id, create=True) as record:
+            memory_snapshot = build_memory_snapshot(record)
+            orchestrator = await get_orchestrator()
+            result = await run_orchestrator(orchestrator, memory_snapshot, body.prompt)
+            commit_remembered_facts(record, result.remember)
+
+            action_payload = _build_action_payload(result.action)
+            if action_payload:
+                result.text, action_type, payload = _apply_phase_gate(
+                    record,
+                    result.text,
+                    action_payload["type"],
+                    action_payload["payload"],
+                )
+                action_payload = {
+                    "type": action_type,
+                    "payload": payload,
+                }
+
+            return StandardResponseEnvelope(
+                status="success",
+                message="Dual-LLM pass complete",
+                data={
+                    "text": result.text,
+                    "intent": result.intent,
+                    "action": action_payload,
+                },
+            )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Dual-LLM processing failed: {str(e)}")
+        logger.exception("Dual-LLM processing failed", extra={"session_id": body.session_id})
+        raise HTTPException(status_code=500, detail="Dual-LLM processing failed") from e

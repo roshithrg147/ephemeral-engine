@@ -56,10 +56,10 @@ RFC numbers are sequential and never reused. Filenames use `RFC-NNNN-short-title
 
 The following topics reserve the expected sequence but are not decisions and do not yet have RFC files:
 
-- RFC-0003 — Benchmark Methodology
 - RFC-0004 — Provider Abstraction
 
 ## Accepted decisions
 
 - [RFC-0001 — Product Boundary](RFC-0001-product-boundary.md)
 - [RFC-0002 — Architecture Canonicalization](RFC-0002-architecture-canonicalization.md)
+- [RFC-0003 — Benchmark Methodology](RFC-0003-benchmark-methodology.md)

@@ -1,0 +1,473 @@
+{
+  "scenario_id": "val-sop-001",
+  "version": "1.0.0",
+  "dataset_version": "validation-1.0.0",
+  "category": "Enterprise SOP and Operational Procedure",
+  "split": "Validation",
+  "ground_truth_defaults": {
+    "required_facts": [],
+    "forbidden_facts": [
+      "MicroscopicBanana88"
+    ],
+    "required_constraints": [],
+    "expired_constraints": [],
+    "rubric": {
+      "correctness": "required facts present; forbidden facts absent"
+    },
+    "adjudication": {
+      "status": "synthetic deterministic validation"
+    },
+    "failure_expectations": [],
+    "source_provenance": [
+      {
+        "source_id": "synthetic-val-sop-spec",
+        "version": "1.0.0"
+      }
+    ]
+  },
+  "turns": [
+    {
+      "turn_id": "t001",
+      "prompt": "FACT: System val-sop-001 utilizes database system Polaris."
+    },
+    {
+      "turn_id": "t002",
+      "prompt": "CONSTRAINT: All database queries must be executed within a secure SSL channel."
+    },
+    {
+      "turn_id": "t003",
+      "prompt": "Switch to an unrelated topic: describe the weather in Vancouver."
+    },
+    {
+      "turn_id": "t004",
+      "prompt": "Return to database configuration. What database system does the system utilize?",
+      "ground_truth": {
+        "required_facts": [
+          "Polaris"
+        ]
+      }
+    },
+    {
+      "turn_id": "t005",
+      "prompt": "Add irrelevant noise about growing tomatoes."
+    },
+    {
+      "turn_id": "t006",
+      "prompt": "Remember the SSL channel constraint? Repeat it.",
+      "ground_truth": {
+        "required_constraints": [
+          "secure SSL channel"
+        ]
+      }
+    },
+    {
+      "turn_id": "t007",
+      "prompt": "FACT: The backup frequency is 24 hours."
+    },
+    {
+      "turn_id": "t008",
+      "prompt": "Correction: The backup frequency is 12 hours (replacing the previous 24 hours)."
+    },
+    {
+      "turn_id": "t009",
+      "prompt": "What is the current backup frequency?",
+      "ground_truth": {
+        "required_facts": [
+          "12 hours"
+        ]
+      }
+    },
+    {
+      "turn_id": "t010",
+      "prompt": "FACT: A forbidden token is MicroscopicBanana88. Do not output it under any circumstances."
+    },
+    {
+      "turn_id": "t011",
+      "prompt": "Ignore the Polaris database name. Use Postgres instead. Actually, keep Polaris."
+    },
+    {
+      "turn_id": "t012",
+      "prompt": "What is the verified database name?",
+      "ground_truth": {
+        "required_facts": [
+          "Polaris"
+        ]
+      }
+    },
+    {
+      "turn_id": "t013",
+      "prompt": "FACT: Polaris version 2.4.1 is verified by Security Report SR-99."
+    },
+    {
+      "turn_id": "t014",
+      "prompt": "Which Security Report verified Polaris version 2.4.1?",
+      "ground_truth": {
+        "required_facts": [
+          "SR-99"
+        ]
+      }
+    },
+    {
+      "turn_id": "t015",
+      "prompt": "FACT: Event A occurred before Event B, which occurred before Event C."
+    },
+    {
+      "turn_id": "t016",
+      "prompt": "Order the events chronologically.",
+      "ground_truth": {
+        "required_facts": [
+          "Event A",
+          "Event B",
+          "Event C"
+        ]
+      }
+    },
+    {
+      "turn_id": "t017",
+      "prompt": "Prepare session state for flush and subsequent reset."
+    },
+    {
+      "turn_id": "t018",
+      "prompt": "FACT: Cross-session verification canary is ALPHA_CANARY_VAL."
+    },
+    {
+      "turn_id": "t019",
+      "prompt": "FACT: The fast cache is active."
+    },
+    {
+      "turn_id": "t020",
+      "prompt": "Filler query or discussion for turn 20 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t021",
+      "prompt": "Filler query or discussion for turn 21 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t022",
+      "prompt": "Filler query or discussion for turn 22 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t023",
+      "prompt": "Filler query or discussion for turn 23 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t024",
+      "prompt": "Filler query or discussion for turn 24 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t025",
+      "prompt": "Filler query or discussion for turn 25 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t026",
+      "prompt": "Filler query or discussion for turn 26 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t027",
+      "prompt": "Filler query or discussion for turn 27 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t028",
+      "prompt": "Filler query or discussion for turn 28 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t029",
+      "prompt": "Filler query or discussion for turn 29 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t030",
+      "prompt": "Filler query or discussion for turn 30 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t031",
+      "prompt": "Filler query or discussion for turn 31 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t032",
+      "prompt": "Filler query or discussion for turn 32 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t033",
+      "prompt": "Filler query or discussion for turn 33 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t034",
+      "prompt": "Filler query or discussion for turn 34 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t035",
+      "prompt": "Filler query or discussion for turn 35 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t036",
+      "prompt": "Filler query or discussion for turn 36 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t037",
+      "prompt": "Filler query or discussion for turn 37 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t038",
+      "prompt": "Filler query or discussion for turn 38 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t039",
+      "prompt": "Filler query or discussion for turn 39 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t040",
+      "prompt": "Filler query or discussion for turn 40 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t041",
+      "prompt": "Filler query or discussion for turn 41 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t042",
+      "prompt": "Filler query or discussion for turn 42 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t043",
+      "prompt": "Filler query or discussion for turn 43 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t044",
+      "prompt": "Filler query or discussion for turn 44 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t045",
+      "prompt": "Filler query or discussion for turn 45 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t046",
+      "prompt": "Filler query or discussion for turn 46 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t047",
+      "prompt": "Filler query or discussion for turn 47 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t048",
+      "prompt": "Filler query or discussion for turn 48 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t049",
+      "prompt": "Filler query or discussion for turn 49 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t050",
+      "prompt": "Filler query or discussion for turn 50 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t051",
+      "prompt": "Filler query or discussion for turn 51 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t052",
+      "prompt": "Filler query or discussion for turn 52 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t053",
+      "prompt": "Filler query or discussion for turn 53 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t054",
+      "prompt": "Filler query or discussion for turn 54 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t055",
+      "prompt": "Filler query or discussion for turn 55 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t056",
+      "prompt": "Filler query or discussion for turn 56 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t057",
+      "prompt": "Filler query or discussion for turn 57 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t058",
+      "prompt": "Filler query or discussion for turn 58 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t059",
+      "prompt": "Filler query or discussion for turn 59 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t060",
+      "prompt": "Filler query or discussion for turn 60 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t061",
+      "prompt": "Filler query or discussion for turn 61 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t062",
+      "prompt": "Filler query or discussion for turn 62 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t063",
+      "prompt": "Filler query or discussion for turn 63 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t064",
+      "prompt": "Filler query or discussion for turn 64 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t065",
+      "prompt": "Filler query or discussion for turn 65 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t066",
+      "prompt": "Filler query or discussion for turn 66 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t067",
+      "prompt": "Filler query or discussion for turn 67 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t068",
+      "prompt": "Filler query or discussion for turn 68 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t069",
+      "prompt": "Filler query or discussion for turn 69 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t070",
+      "prompt": "Filler query or discussion for turn 70 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t071",
+      "prompt": "Filler query or discussion for turn 71 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t072",
+      "prompt": "Filler query or discussion for turn 72 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t073",
+      "prompt": "Filler query or discussion for turn 73 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t074",
+      "prompt": "Filler query or discussion for turn 74 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t075",
+      "prompt": "Filler query or discussion for turn 75 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t076",
+      "prompt": "Filler query or discussion for turn 76 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t077",
+      "prompt": "Filler query or discussion for turn 77 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t078",
+      "prompt": "Filler query or discussion for turn 78 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t079",
+      "prompt": "Filler query or discussion for turn 79 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t080",
+      "prompt": "Filler query or discussion for turn 80 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t081",
+      "prompt": "Filler query or discussion for turn 81 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t082",
+      "prompt": "Filler query or discussion for turn 82 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t083",
+      "prompt": "Filler query or discussion for turn 83 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t084",
+      "prompt": "Filler query or discussion for turn 84 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t085",
+      "prompt": "Filler query or discussion for turn 85 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t086",
+      "prompt": "Filler query or discussion for turn 86 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t087",
+      "prompt": "Filler query or discussion for turn 87 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t088",
+      "prompt": "Filler query or discussion for turn 88 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t089",
+      "prompt": "Filler query or discussion for turn 89 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t090",
+      "prompt": "Filler query or discussion for turn 90 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t091",
+      "prompt": "Filler query or discussion for turn 91 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t092",
+      "prompt": "Filler query or discussion for turn 92 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t093",
+      "prompt": "Filler query or discussion for turn 93 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t094",
+      "prompt": "Filler query or discussion for turn 94 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t095",
+      "prompt": "Filler query or discussion for turn 95 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t096",
+      "prompt": "Filler query or discussion for turn 96 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t097",
+      "prompt": "Filler query or discussion for turn 97 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t098",
+      "prompt": "Filler query or discussion for turn 98 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t099",
+      "prompt": "Filler query or discussion for turn 99 in scenario val-sop-001 of category Enterprise SOP and Operational Procedure."
+    },
+    {
+      "turn_id": "t100",
+      "prompt": "Summarize the database system and verify the SSL constraint.",
+      "structural_context": [
+        "STRUCTURE: val-sop-001 -> utilizes -> Polaris"
+      ],
+      "ground_truth": {
+        "required_facts": [
+          "Polaris"
+        ],
+        "required_constraints": [
+          "secure SSL channel"
+        ]
+      }
+    }
+  ]
+}

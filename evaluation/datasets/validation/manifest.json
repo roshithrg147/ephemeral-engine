@@ -1,0 +1,245 @@
+{
+  "dataset_version": "validation-1.0.0",
+  "scenarios": [
+    {
+      "scenario_id": "val-software-001",
+      "category": "Software Engineering",
+      "turns": 100,
+      "file_path": "evaluation/datasets/validation/val-software-001-v1.json"
+    },
+    {
+      "scenario_id": "val-software-002",
+      "category": "Software Engineering",
+      "turns": 50,
+      "file_path": "evaluation/datasets/validation/val-software-002-v1.json"
+    },
+    {
+      "scenario_id": "val-software-003",
+      "category": "Software Engineering",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-software-003-v1.json"
+    },
+    {
+      "scenario_id": "val-software-004",
+      "category": "Software Engineering",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-software-004-v1.json"
+    },
+    {
+      "scenario_id": "val-software-005",
+      "category": "Software Engineering",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-software-005-v1.json"
+    },
+    {
+      "scenario_id": "val-software-006",
+      "category": "Software Engineering",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-software-006-v1.json"
+    },
+    {
+      "scenario_id": "val-software-007",
+      "category": "Software Engineering",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-software-007-v1.json"
+    },
+    {
+      "scenario_id": "val-software-008",
+      "category": "Software Engineering",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-software-008-v1.json"
+    },
+    {
+      "scenario_id": "val-software-009",
+      "category": "Software Engineering",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-software-009-v1.json"
+    },
+    {
+      "scenario_id": "val-software-010",
+      "category": "Software Engineering",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-software-010-v1.json"
+    },
+    {
+      "scenario_id": "val-legal-001",
+      "category": "Legal and Contract Analysis",
+      "turns": 100,
+      "file_path": "evaluation/datasets/validation/val-legal-001-v1.json"
+    },
+    {
+      "scenario_id": "val-legal-002",
+      "category": "Legal and Contract Analysis",
+      "turns": 50,
+      "file_path": "evaluation/datasets/validation/val-legal-002-v1.json"
+    },
+    {
+      "scenario_id": "val-legal-003",
+      "category": "Legal and Contract Analysis",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-legal-003-v1.json"
+    },
+    {
+      "scenario_id": "val-legal-004",
+      "category": "Legal and Contract Analysis",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-legal-004-v1.json"
+    },
+    {
+      "scenario_id": "val-legal-005",
+      "category": "Legal and Contract Analysis",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-legal-005-v1.json"
+    },
+    {
+      "scenario_id": "val-legal-006",
+      "category": "Legal and Contract Analysis",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-legal-006-v1.json"
+    },
+    {
+      "scenario_id": "val-legal-007",
+      "category": "Legal and Contract Analysis",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-legal-007-v1.json"
+    },
+    {
+      "scenario_id": "val-legal-008",
+      "category": "Legal and Contract Analysis",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-legal-008-v1.json"
+    },
+    {
+      "scenario_id": "val-legal-009",
+      "category": "Legal and Contract Analysis",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-legal-009-v1.json"
+    },
+    {
+      "scenario_id": "val-legal-010",
+      "category": "Legal and Contract Analysis",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-legal-010-v1.json"
+    },
+    {
+      "scenario_id": "val-sop-001",
+      "category": "Enterprise SOP and Operational Procedure",
+      "turns": 100,
+      "file_path": "evaluation/datasets/validation/val-sop-001-v1.json"
+    },
+    {
+      "scenario_id": "val-sop-002",
+      "category": "Enterprise SOP and Operational Procedure",
+      "turns": 50,
+      "file_path": "evaluation/datasets/validation/val-sop-002-v1.json"
+    },
+    {
+      "scenario_id": "val-sop-003",
+      "category": "Enterprise SOP and Operational Procedure",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-sop-003-v1.json"
+    },
+    {
+      "scenario_id": "val-sop-004",
+      "category": "Enterprise SOP and Operational Procedure",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-sop-004-v1.json"
+    },
+    {
+      "scenario_id": "val-sop-005",
+      "category": "Enterprise SOP and Operational Procedure",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-sop-005-v1.json"
+    },
+    {
+      "scenario_id": "val-sop-006",
+      "category": "Enterprise SOP and Operational Procedure",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-sop-006-v1.json"
+    },
+    {
+      "scenario_id": "val-sop-007",
+      "category": "Enterprise SOP and Operational Procedure",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-sop-007-v1.json"
+    },
+    {
+      "scenario_id": "val-sop-008",
+      "category": "Enterprise SOP and Operational Procedure",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-sop-008-v1.json"
+    },
+    {
+      "scenario_id": "val-sop-009",
+      "category": "Enterprise SOP and Operational Procedure",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-sop-009-v1.json"
+    },
+    {
+      "scenario_id": "val-sop-010",
+      "category": "Enterprise SOP and Operational Procedure",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-sop-010-v1.json"
+    },
+    {
+      "scenario_id": "val-knowledge-001",
+      "category": "Knowledge and Research Assistant",
+      "turns": 100,
+      "file_path": "evaluation/datasets/validation/val-knowledge-001-v1.json"
+    },
+    {
+      "scenario_id": "val-knowledge-002",
+      "category": "Knowledge and Research Assistant",
+      "turns": 50,
+      "file_path": "evaluation/datasets/validation/val-knowledge-002-v1.json"
+    },
+    {
+      "scenario_id": "val-knowledge-003",
+      "category": "Knowledge and Research Assistant",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-knowledge-003-v1.json"
+    },
+    {
+      "scenario_id": "val-knowledge-004",
+      "category": "Knowledge and Research Assistant",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-knowledge-004-v1.json"
+    },
+    {
+      "scenario_id": "val-knowledge-005",
+      "category": "Knowledge and Research Assistant",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-knowledge-005-v1.json"
+    },
+    {
+      "scenario_id": "val-knowledge-006",
+      "category": "Knowledge and Research Assistant",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-knowledge-006-v1.json"
+    },
+    {
+      "scenario_id": "val-knowledge-007",
+      "category": "Knowledge and Research Assistant",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-knowledge-007-v1.json"
+    },
+    {
+      "scenario_id": "val-knowledge-008",
+      "category": "Knowledge and Research Assistant",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-knowledge-008-v1.json"
+    },
+    {
+      "scenario_id": "val-knowledge-009",
+      "category": "Knowledge and Research Assistant",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-knowledge-009-v1.json"
+    },
+    {
+      "scenario_id": "val-knowledge-010",
+      "category": "Knowledge and Research Assistant",
+      "turns": 20,
+      "file_path": "evaluation/datasets/validation/val-knowledge-010-v1.json"
+    }
+  ]
+}

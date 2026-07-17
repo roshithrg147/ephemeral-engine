@@ -1,0 +1,257 @@
+{
+  "suite_name": "sc_evm_benchmark_50",
+  "version": 1,
+  "description": "Fifty-turn coding questionnaire for strategy benchmark runs.",
+  "questions": [
+    {
+      "id": 1,
+      "category": "api_design",
+      "prompt": "Design a FastAPI endpoint for creating user accounts with validation, password hashing, and structured error responses."
+    },
+    {
+      "id": 2,
+      "category": "async_io",
+      "prompt": "Refactor a blocking file upload handler into a fully asynchronous implementation with backpressure protection."
+    },
+    {
+      "id": 3,
+      "category": "database",
+      "prompt": "Add pagination, filtering, and stable sorting to a REST endpoint backed by PostgreSQL."
+    },
+    {
+      "id": 4,
+      "category": "testing",
+      "prompt": "Write a test plan for a session registry that must isolate tenant state and expire idle sessions."
+    },
+    {
+      "id": 5,
+      "category": "concurrency",
+      "prompt": "Fix a race condition in a shared cache that is accessed by multiple async workers."
+    },
+    {
+      "id": 6,
+      "category": "observability",
+      "prompt": "Instrument an API service with request latency metrics, structured logs, and trace correlation IDs."
+    },
+    {
+      "id": 7,
+      "category": "refactor",
+      "prompt": "Split a monolithic service layer into controller, service, and repository modules without changing behavior."
+    },
+    {
+      "id": 8,
+      "category": "security",
+      "prompt": "Harden a login flow against brute force attacks using rate limits, audit logs, and lockout thresholds."
+    },
+    {
+      "id": 9,
+      "category": "streaming",
+      "prompt": "Implement SSE streaming for incremental model output while preserving final response metadata."
+    },
+    {
+      "id": 10,
+      "category": "memory",
+      "prompt": "Design a per-session memory store with TTL eviction, explicit burn cleanup, and checksum validation."
+    },
+    {
+      "id": 11,
+      "category": "api_design",
+      "prompt": "Create an idempotent PUT endpoint for updating project settings with optimistic concurrency checks."
+    },
+    {
+      "id": 12,
+      "category": "async_io",
+      "prompt": "Move synchronous HTTP calls out of an event loop and replace them with a pooled async client."
+    },
+    {
+      "id": 13,
+      "category": "database",
+      "prompt": "Model a many-to-many relationship in an ORM and write migrations for the new schema."
+    },
+    {
+      "id": 14,
+      "category": "testing",
+      "prompt": "Add unit tests that prove a prompt manager returns deterministic system prompts for multiple roles."
+    },
+    {
+      "id": 15,
+      "category": "concurrency",
+      "prompt": "Prevent one global lock from serializing all tenants in a multi-user async service."
+    },
+    {
+      "id": 16,
+      "category": "observability",
+      "prompt": "Create a JSON report that records per-turn latency, token counts, and success rate for benchmark runs."
+    },
+    {
+      "id": 17,
+      "category": "refactor",
+      "prompt": "Extract model-specific API logic behind a connector interface so the rest of the app is provider agnostic."
+    },
+    {
+      "id": 18,
+      "category": "security",
+      "prompt": "Review a file upload feature for path traversal, oversized payloads, and unsafe temporary file handling."
+    },
+    {
+      "id": 19,
+      "category": "streaming",
+      "prompt": "Convert a blocking chat response endpoint into a streamed response that can be consumed by a web client."
+    },
+    {
+      "id": 20,
+      "category": "memory",
+      "prompt": "Add a state manifest object that checks whether session history has diverged before execution continues."
+    },
+    {
+      "id": 21,
+      "category": "api_design",
+      "prompt": "Design an endpoint for burning a session and guaranteeing that all associated volatile records are removed."
+    },
+    {
+      "id": 22,
+      "category": "async_io",
+      "prompt": "Wrap a CPU-bound embedding call in a safe off-thread execution path without blocking request handling."
+    },
+    {
+      "id": 23,
+      "category": "database",
+      "prompt": "Optimize a query that scans a large audit table by adding the right indexes and reducing full table reads."
+    },
+    {
+      "id": 24,
+      "category": "testing",
+      "prompt": "Write integration tests that verify one session cannot read another session's retained context."
+    },
+    {
+      "id": 25,
+      "category": "concurrency",
+      "prompt": "Explain how to make a benchmark harness deterministic when it runs multiple strategies sequentially."
+    },
+    {
+      "id": 26,
+      "category": "observability",
+      "prompt": "Add telemetry events for model retries, fallback paths, and session cleanup failures."
+    },
+    {
+      "id": 27,
+      "category": "refactor",
+      "prompt": "Move all hardcoded prompt templates out of the route handler and into a dedicated prompt manager service."
+    },
+    {
+      "id": 28,
+      "category": "security",
+      "prompt": "Defend an API against prompt injection that attempts to override system instructions."
+    },
+    {
+      "id": 29,
+      "category": "streaming",
+      "prompt": "Implement token-by-token output for a long model response while still emitting action metadata at the end."
+    },
+    {
+      "id": 30,
+      "category": "memory",
+      "prompt": "Prevent memory exhaustion in a long-running service by introducing eviction policy and bounded state growth."
+    },
+    {
+      "id": 31,
+      "category": "api_design",
+      "prompt": "Add a health endpoint that reports subsystem readiness, active sessions, and external dependency status."
+    },
+    {
+      "id": 32,
+      "category": "async_io",
+      "prompt": "Refactor a synchronous ChromaDB retrieval step so it no longer blocks the main request path."
+    },
+    {
+      "id": 33,
+      "category": "database",
+      "prompt": "Implement soft delete semantics for a resource table and ensure queries ignore deleted rows by default."
+    },
+    {
+      "id": 34,
+      "category": "testing",
+      "prompt": "Create a load test that simulates 10x normal traffic and reports the first point of failure."
+    },
+    {
+      "id": 35,
+      "category": "concurrency",
+      "prompt": "Explain how to guard a session registry with per-session locks instead of a single process-wide mutex."
+    },
+    {
+      "id": 36,
+      "category": "observability",
+      "prompt": "Build a validation report file that includes latency, token usage, and any failed benchmark turns."
+    },
+    {
+      "id": 37,
+      "category": "refactor",
+      "prompt": "Refactor an agent so its orchestration logic becomes stateless and accepts a memory snapshot as input."
+    },
+    {
+      "id": 38,
+      "category": "security",
+      "prompt": "Audit a cleanup routine for silent exception handling and replace it with structured logging."
+    },
+    {
+      "id": 39,
+      "category": "streaming",
+      "prompt": "Preserve SSE compatibility while adding richer turn metadata for downstream analytics consumers."
+    },
+    {
+      "id": 40,
+      "category": "memory",
+      "prompt": "Implement a checksum over session history and fail fast if the stored state no longer matches the manifest."
+    },
+    {
+      "id": 41,
+      "category": "api_design",
+      "prompt": "Add a session list endpoint that returns only live sessions and does not expose expired records."
+    },
+    {
+      "id": 42,
+      "category": "async_io",
+      "prompt": "Move model synthesis off the request thread and keep the API responsive under sustained concurrent load."
+    },
+    {
+      "id": 43,
+      "category": "database",
+      "prompt": "Design an archival job that moves old audit entries out of the hot table without losing traceability."
+    },
+    {
+      "id": 44,
+      "category": "testing",
+      "prompt": "Write a regression test for a benchmark runner that must clean up every session even when a turn fails."
+    },
+    {
+      "id": 45,
+      "category": "concurrency",
+      "prompt": "Explain how to prevent deadlocks when multiple async tasks update the same tenant-owned state."
+    },
+    {
+      "id": 46,
+      "category": "observability",
+      "prompt": "Add metrics that reveal whether model retries or retrieval steps dominate end-to-end latency."
+    },
+    {
+      "id": 47,
+      "category": "refactor",
+      "prompt": "Extract a benchmark strategy interface so new agents can be added without changing the runner."
+    },
+    {
+      "id": 48,
+      "category": "security",
+      "prompt": "Review a shutdown path for leaked resources, open sockets, and uncaught background task failures."
+    },
+    {
+      "id": 49,
+      "category": "streaming",
+      "prompt": "Implement a streaming adapter that can parse an SSE response and reconstruct the final text payload."
+    },
+    {
+      "id": 50,
+      "category": "memory",
+      "prompt": "Design a benchmark session lifecycle that starts clean, runs deterministically, and always tears down state."
+    }
+  ]
+}

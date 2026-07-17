@@ -1,26 +1,75 @@
-# Ephemeral Engine: State-Cached Ephemeral Vector Memory (SC-EVM)
+# SC-EVM (State-Cached Ephemeral Vector Memory)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python: 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![Manager: uv](https://img.shields.io/badge/managed%20by-uv-purple.svg)](https://github.com/astral-sh/uv)
-[![Backend: NVIDIA NIM](https://img.shields.io/badge/Backend-NVIDIA%20NIM-76B900.svg)](https://build.nvidia.com/)
 
-Ephemeral Engine is AI context-control middleware designed to reduce unbounded conversation-history growth and context blindness in multi-turn applications.
+SC-EVM is a session-isolated context-control middleware for multi-turn AI applications. It optimizes context retention, limits prompt growth, and provides logical session boundaries.
 
-By shifting from linear append-only chat history to a **State-Cached Ephemeral Vector Memory (SC-EVM)** architecture, the engine bounds the direct active-history window and retrieves selected prior context. Total token use remains variable because retrieved context, reformulation, reasoning, and output also contribute to usage.
+---
 
-## Governance and Source of Truth
+## 1. Frequently Asked Questions (FAQ)
 
-- [Product Manifesto](MANIFESTO.md) — the highest-level philosophy, principles, pillars, and long-term ambition.
-- [Product Boundary](PRODUCT_BOUNDARY.md) — the authoritative product definition, MVP, scope, classification, and non-goals.
-- [Architecture](ARCHITECTURE.md) — the authoritative description of implemented technical behavior, experiments, limitations, and proposed work.
-- [RFC process](rfcs/README.md) — the controlled process for significant product and architecture decisions.
+### What is SC-EVM?
+SC-EVM stands for **State-Cached Ephemeral Vector Memory**. It is a developer-preview middleware that sits between your application and large language models (LLMs) to manage conversation history, context retrieval, and memory isolation.
+
+### What problem does it solve?
+In long-running multi-turn conversations, standard chat histories grow linearly, leading to:
+1. Unbounded token usage and high costs.
+2. Context window saturation.
+3. Context blindness (where relevant earlier facts are lost or ignored).
+
+SC-EVM solves this by replacing linear append-only history with a bounded active-history window and dynamic vector-based retrieval.
+
+### What can it do today?
+- **Logical Session Isolation:** Isolates conversation history and vector embeddings per session.
+- **Dynamic Outlier Gating:** Admits or rejects previous memories based on cosine distance thresholds.
+- **Async Query Reformulation:** Translates conversational prompts into search queries and grounded instructions.
+- **Logical State Deletion (Burn):** Purges volatile memory and session-scoped vector collections via the `/burn` command or API.
+- **NVIDIA NIM Support:** Integrates with the NVIDIA NIM API for LLM completions.
+
+### What can it not do?
+- **No Production Multi-Tenant Auth:** All API endpoints are unauthenticated. SC-EVM does not include authorization middleware.
+- **No Physical Memory Sanitization:** Session burn purges logical collections and registry mappings but does not sanitize the physical server RAM.
+- **No Provider Independence:** The LLM transport is currently implemented only for the NVIDIA NIM completions API.
+
+### How do I run it locally?
+1. Copy `.env.example` to `.env` and fill in `NVIDIA_API_KEY`.
+2. Start the REST API backend:
+   ```bash
+   uv run uvicorn src.main:app --host 127.0.0.1 --port 8000
+   ```
+3. Run the interactive CLI assistant:
+   ```bash
+   uv run assistant
+   ```
+
+### How do I test it?
+Run the pytest test suite:
+```bash
+uv run pytest
+```
+
+### What is Graphify?
+Graphify is an experimental capability that injects structured relationship definitions (e.g. `STRUCTURE: A -> depends_on -> B`) into the LLM context. Offline validation-preview results showed no correctness difference; no live quality conclusion is certified.
+
+### What evidence exists?
+SC-EVM's execution plumbing has been exercised over 12,240 offline deterministic turns across 12 validation-preview scenarios. Those runs used the `offline-smoke` fact extractor and are marked `publishable: false`; they do not establish live answer quality, latency, cost, or provider behavior.
+
+See [Final Statistical Report](evaluation/final/FINAL_STATISTICAL_REPORT.md) together with [Final Limitations](evaluation/final/FINAL_LIMITATIONS.md) and [Claim Certification](evaluation/CLAIM_CERTIFICATION.md).
+
+### What claims are not being made?
+We do **NOT** claim that SC-EVM is:
+- **Production-ready** or **Enterprise-grade**.
+- **Provider-independent** (requires NVIDIA NIM).
+- **Leakage-proof** (auth must be implemented at the gateway).
+
+### How can I provide feedback?
+Please see [Feedback and Triage](docs/FEEDBACK_AND_TRIAGE.md) for how to submit bug reports, feature requests, or reproduction results.
 
 ---
 
 ## 🏗️ Architecture Overview
-
-The framework operates as an asynchronous pipeline that isolates session memories, reformulates ambiguous user intents, and dynamically pulls relevant context using advanced vector clustering statistics.
 
 ```
                   ┌──────────────────────────┐
@@ -29,8 +78,8 @@ The framework operates as an asynchronous pipeline that isolates session memorie
                                │
                                ▼
                   ┌──────────────────────────┐
-                  │ Async Intent Realigner   │ ───► Dual-Purpose JSON payload output
-                  └────────────┬─────────────┘      (Search query + Grounded Prompt)
+                  │ Async Intent Realigner   │
+                  └────────────┬─────────────┘
                                │
                 ┌──────────────┴──────────────┐
                 ▼                             ▼
@@ -40,61 +89,8 @@ The framework operates as an asynchronous pipeline that isolates session memorie
    └──────────────────────────┘  └──────────────────────────┘
 ```
 
-### Key Engineering Features
-* **Bounded Active History:** Caps the direct conversation-history window while selected retrieved context remains variable.
-* **Dual-Anchor Protection Gating Engine:** Prunes matching memories using absolute and relative confidence rules to reduce irrelevant context creep; retrieval-quality improvement requires controlled validation.
-* **Dual-Purpose Intent Realignment:** The Async Query Reformulator outputs a structured JSON schema:
-  1. `search_vector_query`: A dense, keyword-heavy search query optimized strictly for vector database similarity matches.
-  2. `grounded_llm_prompt`: An expanded, fully explicit version of the prompt resolving all pronouns and fragmented context links. This ensures both vector search and primary reasoner are aligned.
-* **Pooled Model Connections:** Reuses configured HTTP clients for model calls and applies timeouts and retries.
-* **XML-Tagged Enclosure Prompt Segregation:** Segregates retrieved contexts and pending memories inside explicit `<retrieved_memory>` XML tags. The system prompt instructs the reasoner to treat these contents strictly as untrusted data references, ensuring that instructions or overrides embedded in history cannot affect model behavior.
-* **Volatile Memory Interceptor Proxy:** A thread-safe, locked buffer (`pending_commit_buffer`) that acts as a real-time cache. If an embedding worker thread is mid-flight over the network during high-speed typing, the downstream reasoner intercepts the raw string to guarantee complete contextual ingestion.
-* **Session Isolation and Burn:** Maintains separate in-process session state and provides explicit burn behavior that deletes the session record and its ephemeral collection. This does not claim physical RAM destruction or erase separate durable audit and learned-fact files.
-
----
-
-## ⚡ Quick Start
-
-### Prerequisites
-* Python 3.11 or higher.
-* Installed [`uv`](https://github.com/astral-sh/uv) package manager.
-* An NVIDIA API key with access to the configured models.
-
-### Environment Setup
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/roshithrg147/ephemeral-engine.git
-   cd ephemeral-engine
-   ```
-
-2. Configure your environment variables:
-   ```bash
-   export NVIDIA_API_KEY="your-api-key"
-   ```
-
-3. Initialize dependencies and run the streaming interactive CLI using `uv`:
-   ```bash
-   uv run python src/sc_evm.py
-   ```
-
-### Running Automated Integration Tests
-Verify the entire pipeline including connection diagnostics, dual-anchor gating boundaries, JSON query reformulation, and turn execution:
-```bash
-uv run python src/sc_evm.py --test
-```
-
----
-
-## 🛠️ Interactive Session Commands
-
-Inside the execution loop, the interactive CLI exposes structural runtime actions:
-
-* `/burn` : Forces an instantaneous clear of the volatile buffer queue, wipes out the active in-memory ChromaDB collection, and flushes dialogue histories.
-* `exit` : Executes a safe, graceful termination sequence, triggers a full memory burn, and securely disconnects network socket channels.
-
 ---
 
 ## 🛡️ License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+SC-EVM is licensed under the MIT License. See [LICENSE](LICENSE) for details.

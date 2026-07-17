@@ -1,26 +1,41 @@
-import os
-import json
 import asyncio
+import hashlib
+import json
 import logging
+import os
+import tempfile
+import threading
+import time
+import weakref
+from collections.abc import Callable, Iterable
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
-from collections import defaultdict
-from typing import Dict, List, Any, Optional
+from typing import Any
+
 import chromadb
 from chromadb.api import ClientAPI
 from chromadb.api.models.Collection import Collection
+from filelock import FileLock, Timeout
+
+from src.config import settings
+
+# Telemetry sink for audit compliance
+try:
+    from telemetry_sink import log_error, log_interaction
+except ImportError:
+    from src.telemetry_sink import log_error, log_interaction
+
 
 class SessionLock:
     """
-    A custom reader-writer lock with writer preference.
+    A session-scoped async lock.
     Supports 'async with' directly as an exclusive write lock.
-    Exposes 'read_lock()' context manager for concurrent reads.
+    The read-lock API is retained for compatibility but uses the same mutex.
     """
+
     def __init__(self):
         self.write_lock = asyncio.Lock()
-        self.num_readers = 0
-        self.readers_done = asyncio.Event()
-        self.readers_done.set()
-        self.pending_writers = 0
 
     async def __aenter__(self):
         """Acquires the exclusive write lock."""
@@ -32,26 +47,16 @@ class SessionLock:
         self.release_write()
 
     async def acquire_write(self):
-        self.pending_writers += 1
         await self.write_lock.acquire()
-        await self.readers_done.wait()
 
     def release_write(self):
-        self.pending_writers -= 1
         self.write_lock.release()
 
     async def acquire_read(self):
-        # If write lock is held or a writer is waiting, wait for the write lock
-        if self.write_lock.locked() or self.pending_writers > 0:
-            async with self.write_lock:
-                pass
-        self.num_readers += 1
-        self.readers_done.clear()
+        await self.write_lock.acquire()
 
     def release_read(self):
-        self.num_readers -= 1
-        if self.num_readers == 0:
-            self.readers_done.set()
+        self.write_lock.release()
 
     def read_lock(self):
         """Returns a context manager for concurrent reads."""
@@ -60,6 +65,7 @@ class SessionLock:
 
 class _SessionReadLock:
     """Helper context manager class for reading."""
+
     def __init__(self, lock: SessionLock):
         self.lock = lock
 
@@ -75,21 +81,140 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SC-EVM.Memory")
 
 DEFAULT_MEMORY_PATH = os.path.expanduser("~/.assistant_memory.json")
+SESSION_TTL_SECONDS = settings.GC_TTL_SECONDS
+SESSION_GC_INTERVAL_SECONDS = settings.GC_INTERVAL_SECONDS
+MAX_ACTIVE_SESSIONS = settings.MAX_ACTIVE_SESSIONS
+_runtime_lock = threading.Lock()
+_shared_chroma_client: ClientAPI | None = None
+_shared_embedding_fn = None
+_calibrated_threshold: float | None = None
+
+
+def _get_shared_chroma_client() -> ClientAPI:
+    global _shared_chroma_client
+    if _shared_chroma_client is None:
+        with _runtime_lock:
+            if _shared_chroma_client is None:
+                _shared_chroma_client = chromadb.EphemeralClient()
+    return _shared_chroma_client
+
+
+def _get_shared_embedding_function():
+    global _shared_embedding_fn
+    if _shared_embedding_fn is None:
+        with _runtime_lock:
+            if _shared_embedding_fn is None:
+                from chromadb.utils import embedding_functions
+
+                _shared_embedding_fn = embedding_functions.ONNXMiniLM_L6_V2()
+    return _shared_embedding_fn
+
+
+def warm_memory_runtime() -> None:
+    """Load local vector runtime assets before the service reports ready."""
+    _get_shared_chroma_client()
+    _get_shared_embedding_function()(["SC-EVM runtime readiness"])
+
+
+def _ensure_memory_structure(data: dict[str, Any]) -> dict[str, Any]:
+    if "user_profile" not in data:
+        data["user_profile"] = {}
+    if "learned_facts" not in data:
+        data["learned_facts"] = []
+    if "interaction_stats" not in data:
+        data["interaction_stats"] = {
+            "total_queries": 0,
+            "first_seen": datetime.now().isoformat(),
+            "last_seen": datetime.now().isoformat(),
+        }
+    return data
+
+
+def checksum_history(history: list[dict[str, str]]) -> str:
+    """Returns a stable checksum for a session history payload."""
+    canonical = json.dumps(history, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class StateManifest:
+    session_id: str
+    history_checksum: str
+    message_count: int
+    generated_at: float
+
+    @classmethod
+    def from_history(cls, session_id: str, history: list[dict[str, str]]) -> "StateManifest":
+        return cls(
+            session_id=session_id,
+            history_checksum=checksum_history(history),
+            message_count=len(history),
+            generated_at=time.time(),
+        )
+
+    def validate(self, history: list[dict[str, str]]) -> bool:
+        return self.message_count == len(history) and self.history_checksum == checksum_history(
+            history
+        )
+
+
+class ManifestedHistory(list):
+    """List that refreshes a session manifest whenever history is mutated."""
+
+    def __init__(
+        self, on_change: Callable[[], None], initial: Iterable[dict[str, str]] | None = None
+    ):
+        super().__init__(initial or [])
+        self._on_change = on_change
+
+    def _changed(self) -> None:
+        self._on_change()
+
+    def append(self, item: dict[str, str]) -> None:
+        super().append(item)
+        self._changed()
+
+    def extend(self, items: Iterable[dict[str, str]]) -> None:
+        super().extend(items)
+        self._changed()
+
+    def insert(self, index: int, item: dict[str, str]) -> None:
+        super().insert(index, item)
+        self._changed()
+
+    def pop(self, index: int = -1):
+        item = super().pop(index)
+        self._changed()
+        return item
+
+    def clear(self) -> None:
+        super().clear()
+        self._changed()
+
+    def __setitem__(self, index, value) -> None:
+        super().__setitem__(index, value)
+        self._changed()
+
+    def __delitem__(self, index) -> None:
+        super().__delitem__(index)
+        self._changed()
+
 
 class MemoryManager:
     """Manages short-term (session) and long-term (persistent file) memory for the assistant."""
 
     def __init__(self, memory_file_path: str = DEFAULT_MEMORY_PATH):
         self.memory_file_path = memory_file_path
-        self.short_term_history: List[Dict[str, str]] = []
-        self.long_term_data: Dict[str, Any] = {
+        self.lock_file = f"{self.memory_file_path}.lock"
+        self.short_term_history: list[dict[str, str]] = []
+        self.long_term_data: dict[str, Any] = {
             "user_profile": {},
             "learned_facts": [],
             "interaction_stats": {
                 "total_queries": 0,
                 "first_seen": datetime.now().isoformat(),
-                "last_seen": datetime.now().isoformat()
-            }
+                "last_seen": datetime.now().isoformat(),
+            },
         }
         self.load_long_term_memory()
 
@@ -97,50 +222,67 @@ class MemoryManager:
         """Loads persistent long-term memory from the JSON file."""
         if os.path.exists(self.memory_file_path):
             try:
-                with open(self.memory_file_path, "r", encoding="utf-8") as f:
-                    self.long_term_data = json.load(f)
-                # Ensure structure is sound
-                if "user_profile" not in self.long_term_data:
-                    self.long_term_data["user_profile"] = {}
-                if "learned_facts" not in self.long_term_data:
-                    self.long_term_data["learned_facts"] = []
-                if "interaction_stats" not in self.long_term_data:
-                    self.long_term_data["interaction_stats"] = {
-                        "total_queries": 0,
-                        "first_seen": datetime.now().isoformat(),
-                        "last_seen": datetime.now().isoformat()
-                    }
+                with FileLock(self.lock_file, timeout=5):
+                    with open(self.memory_file_path, encoding="utf-8") as f:
+                        self.long_term_data = _ensure_memory_structure(json.load(f))
             except Exception as e:
-                # If corrupt or error, keep defaults
-                pass
+                logger.error(
+                    "Persistent memory load failed; defaults retained",
+                    extra={"memory_file_path": self.memory_file_path},
+                    exc_info=True,
+                )
+                log_error("memory.load_long_term_memory", str(e))
         else:
             self.save_long_term_memory()
 
+    def _persist_long_term_memory(self) -> bool:
+        try:
+            directory = os.path.dirname(self.memory_file_path) or "."
+            os.makedirs(directory, exist_ok=True)
+            with FileLock(self.lock_file, timeout=5):
+                descriptor, temporary_path = tempfile.mkstemp(
+                    prefix=".memory-", suffix=".tmp", dir=directory
+                )
+                try:
+                    with os.fdopen(descriptor, "w", encoding="utf-8") as memory_file:
+                        json.dump(self.long_term_data, memory_file, indent=2, ensure_ascii=False)
+                        memory_file.flush()
+                        os.fsync(memory_file.fileno())
+                    os.replace(temporary_path, self.memory_file_path)
+                finally:
+                    if os.path.exists(temporary_path):
+                        os.remove(temporary_path)
+            return True
+        except Timeout:
+            logger.error(
+                "CRITICAL: Could not acquire lock for memory file. Skipping write to prevent corruption."
+            )
+            log_error("memory.save_long_term_memory.lock_timeout", self.memory_file_path)
+        except Exception as e:
+            logger.error("CRITICAL: Persistent memory failure", exc_info=True)
+            log_error("memory.save_long_term_memory", str(e))
+        return False
+
     def save_long_term_memory(self) -> None:
         """Saves persistent long-term memory to the JSON file."""
-        try:
-            # Ensure folder exists
-            os.makedirs(os.path.dirname(self.memory_file_path), exist_ok=True)
-            with open(self.memory_file_path, "w", encoding="utf-8") as f:
-                json.dump(self.long_term_data, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            # Silently ignore write failures if permissions are lacking
-            pass
+        self._persist_long_term_memory()
 
     # --- Short term Memory API ---
 
     def add_interaction(self, user_message: str, assistant_response: str) -> None:
         """Adds a complete turn to the short-term conversation history."""
-        self.short_term_history.append({"role": "user", "content": user_message})
-        self.short_term_history.append({"role": "assistant", "content": assistant_response})
-
-        # Update metrics
+        self.short_term_history.extend(
+            [
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": assistant_response},
+            ]
+        )
         stats = self.long_term_data["interaction_stats"]
         stats["total_queries"] += 1
         stats["last_seen"] = datetime.now().isoformat()
         self.save_long_term_memory()
 
-    def get_short_term_history(self) -> List[Dict[str, str]]:
+    def get_short_term_history(self) -> list[dict[str, str]]:
         """Returns the conversation history."""
         return self.short_term_history
 
@@ -157,7 +299,6 @@ class MemoryManager:
             return False
 
         facts = self.long_term_data["learned_facts"]
-        # Simple deduplication check (case-insensitive)
         if any(f.lower() == fact.lower() for f in facts):
             return False
 
@@ -181,13 +322,8 @@ class MemoryManager:
 
     def get_long_term_context(self) -> str:
         """Generates a text summary of the long term memory to inject as system prompt context."""
-        profile_parts = []
-        for k, v in self.long_term_data["user_profile"].items():
-            profile_parts.append(f"- {k}: {v}")
-
-        facts_parts = []
-        for fact in self.long_term_data["learned_facts"]:
-            facts_parts.append(f"- {fact}")
+        profile_parts = [f"- {k}: {v}" for k, v in self.long_term_data["user_profile"].items()]
+        facts_parts = [f"- {fact}" for fact in self.long_term_data["learned_facts"]]
 
         summary = ""
         if profile_parts:
@@ -203,23 +339,69 @@ class SessionRecord:
     Volatile state container for a single microservice tenant session.
     Encapsulates memory-confined storage configurations.
     """
+
     def __init__(self, session_id: str):
         self.session_id: str = session_id
-        self.chat_history: List[Dict[str, str]] = []
-        self.metadata_registry: Dict[str, Any] = {
-            "pending_commit_buffer": [],
-            "base_threshold": 0.52,
-            "token_budget": 2500
-        }
+        self.last_accessed: float = time.time()
+        self.chat_history: ManifestedHistory = ManifestedHistory(self.refresh_manifest)
+        self.state_manifest: StateManifest = StateManifest.from_history(
+            session_id, self.chat_history
+        )
+
         # Initialize isolated, memory-mapped storage engine
-        from chromadb.utils import embedding_functions
-        self.chroma_client: ClientAPI = chromadb.EphemeralClient()
-        self.embedding_fn = embedding_functions.ONNXMiniLM_L6_V2()
+        self.chroma_client = _get_shared_chroma_client()
+        self.embedding_fn = _get_shared_embedding_function()
+
+        self.metadata_registry: dict[str, Any] = {
+            "pending_commit_buffer": [],
+            "base_threshold": float(self._calibrate_threshold()),
+            "development_phase": settings.DEVELOPMENT_PHASE,
+            "token_budget": 2500,
+        }
+
         self.collection: Collection = self.chroma_client.get_or_create_collection(
             name=f"session_{session_id}",
-            embedding_function=self.embedding_fn
+            embedding_function=self.embedding_fn,
+            metadata={"hnsw:space": "cosine"},
         )
-        logger.info(f"Initialized volatile vector collection space for tenant session: {session_id}")
+        logger.info(
+            f"Initialized volatile vector collection space for tenant session: {session_id}"
+        )
+
+    def _calibrate_threshold(self) -> float:
+        """Derive a stable semantic threshold, falling back to a safe default."""
+        global _calibrated_threshold
+        if _calibrated_threshold is not None:
+            return _calibrated_threshold
+        try:
+            import math
+
+            def cosine_dist(a, b):
+                dot = sum(x * y for x, y in zip(a, b, strict=True))
+                norm_a = math.sqrt(sum(x * x for x in a))
+                norm_b = math.sqrt(sum(x * x for x in b))
+                if norm_a == 0 or norm_b == 0:
+                    return 1.0
+                return 1.0 - (dot / (norm_a * norm_b))
+
+            pos_pairs = self.embedding_fn(["Update configuration", "Modify settings"])
+            neg_pair = self.embedding_fn(["The quick brown fox jumps over the lazy dog"])
+            pos_dist = cosine_dist(pos_pairs[0], pos_pairs[1])
+            neg_dist = cosine_dist(pos_pairs[0], neg_pair[0])
+            dynamic_threshold = pos_dist + ((neg_dist - pos_dist) * 0.3)
+            _calibrated_threshold = max(0.1, min(0.9, dynamic_threshold))
+        except Exception as e:
+            logger.warning("Dynamic calibration failed, falling back to 0.52", exc_info=True)
+            log_error("memory.session_record.dynamic_calibration", str(e))
+            _calibrated_threshold = 0.52
+        return _calibrated_threshold
+
+    def refresh_manifest(self) -> StateManifest:
+        self.state_manifest = StateManifest.from_history(self.session_id, self.chat_history)
+        return self.state_manifest
+
+    def validate_manifest(self) -> bool:
+        return self.state_manifest.validate(self.chat_history)
 
 
 class MultiTenantSessionRegistry:
@@ -227,55 +409,86 @@ class MultiTenantSessionRegistry:
     Thread-safe concurrency container managing lifecycle state transitions
     across independent memory-mapped tenant profiles.
     """
-    def __init__(self):
-        self._sessions: Dict[str, SessionRecord] = {}
-        self._locks: Dict[str, asyncio.Lock] = {}
-        self._global_lock: asyncio.Lock = asyncio.Lock()
 
-    async def get_session_lock(self, session_id: str) -> asyncio.Lock:
+    def __init__(self):
+        self._sessions: dict[str, SessionRecord] = {}
+        self._locks: weakref.WeakValueDictionary[str, SessionLock] = weakref.WeakValueDictionary()
+        self._gc_task: asyncio.Task | None = None
+
+    def get_session_lock(self, session_id: str) -> SessionLock:
         """
         Retrieves or initializes an atomic lock bound exclusively to the tenant session context.
         """
-        async with self._global_lock:
-            if session_id not in self._locks:
-                self._locks[session_id] = asyncio.Lock()
-            return self._locks[session_id]
+        lock = self._locks.get(session_id)
+        if lock is None:
+            lock = SessionLock()
+            self._locks[session_id] = lock
+        return lock
+
+    def list_session_ids(self) -> list[str]:
+        """Returns the current session identifiers in insertion order."""
+        return list(self._sessions.keys())
+
+    def _touch_session(self, session: SessionRecord) -> SessionRecord:
+        session.last_accessed = time.time()
+        return session
+
+    def _get_session_unlocked(self, session_id: str) -> SessionRecord | None:
+        return self._sessions.get(session_id)
+
+    @asynccontextmanager
+    async def _session_scope(self, session_id: str, *, create: bool = False):
+        lock = self.get_session_lock(session_id)
+        async with lock:
+            session = self._get_session_unlocked(session_id)
+            if session is None:
+                if not create:
+                    raise KeyError(f"Session state context uninitialized: {session_id}")
+                await self._evict_capacity_pressure(exclude_session_id=session_id)
+                session = SessionRecord(session_id)
+                self._sessions[session_id] = session
+
+            session = self._touch_session(session)
+            self._guard_session_state(session)
+            yield session
 
     async def initialize_session(self, session_id: str) -> SessionRecord:
         """
         Dynamically initializes an isolated, memory-confined session profile for a user.
         Uses exclusive write lock.
         """
-        lock = await self.get_session_lock(session_id)
-        async with lock:
-            async with self._global_lock:
-                if session_id not in self._sessions:
-                    self._sessions[session_id] = SessionRecord(session_id)
-            return self._sessions[session_id]
+        async with self._session_scope(session_id, create=True) as session:
+            return session
 
-    async def get_session(self, session_id: str) -> Optional[SessionRecord]:
+    @asynccontextmanager
+    async def session_operation(self, session_id: str, *, create: bool = False):
+        """Hold a session's lifecycle lock for one complete logical operation."""
+        async with self._session_scope(session_id, create=create) as session:
+            yield session
+
+    async def get_session(self, session_id: str) -> SessionRecord | None:
         """
         Fetches an existing session profile without forcing side-effect mutations.
         Uses exclusive lock to ensure safe read.
         """
-        lock = await self.get_session_lock(session_id)
-        async with lock:
-            async with self._global_lock:
-                return self._sessions.get(session_id)
+        try:
+            async with self._session_scope(session_id) as session:
+                return session
+        except KeyError:
+            return None
 
     async def append_message(self, session_id: str, role: str, content: str) -> None:
         """
         Appends a verified conversation log directly to the tenant's history buffer.
         Uses exclusive write lock.
         """
-        lock = await self.get_session_lock(session_id)
-        async with lock:
-            async with self._global_lock:
-                session = self._sessions.get(session_id)
-            if session:
-                session.chat_history.append({"role": role, "content": content})
-            else:
-                raise KeyError(f"Session state context uninitialized: {session_id}")
+        async with self._session_scope(session_id) as session:
+            session.chat_history.append({"role": role, "content": content})
+            while len(session.chat_history) > settings.MAX_HISTORY_TURNS:
+                session.chat_history.pop(0)
+            session.refresh_manifest()
+            # Log to immutable telemetry sink
+            log_interaction(session_id, role, content)
 
     async def flush_session(self, session_id: str) -> bool:
         """
@@ -283,23 +496,112 @@ class MultiTenantSessionRegistry:
         its ephemeral collection. This does not guarantee physical RAM erasure.
         Uses exclusive write lock.
         """
-        lock = await self.get_session_lock(session_id)
+        lock = self.get_session_lock(session_id)
         async with lock:
-            async with self._global_lock:
-                if session_id in self._sessions:
-                    # Wipe memory structures explicitly
-                    session = self._sessions[session_id]
-                    try:
-                        session.chroma_client.delete_collection(f"session_{session_id}")
-                    except Exception as e:
-                        logger.warning(f"Error purging vector space for session {session_id}: {e}")
-
-                    del self._sessions[session_id]
-                    if session_id in self._locks:
-                        del self._locks[session_id]
-                    logger.info(f"Programmatic /burn executed successfully. Purged space for: {session_id}")
-                    return True
+            session = self._sessions.pop(session_id, None)
+            if not session:
                 return False
+
+            try:
+                session.chroma_client.delete_collection(f"session_{session_id}")
+            except Exception as e:
+                logger.warning(
+                    "Error purging vector space for session",
+                    extra={"session_id": session_id},
+                    exc_info=True,
+                )
+                log_error("memory.flush_session.delete_collection", str(e))
+
+            logger.info(f"Programmatic /burn executed successfully. Purged space for: {session_id}")
+            return True
+
+    def _assert_state_integrity(self, session: SessionRecord) -> None:
+        if session.validate_manifest():
+            return
+
+        logger.critical(
+            "Session state manifest checksum mismatch",
+            extra={"session_id": session.session_id},
+        )
+        log_error("memory.state_manifest.mismatch", session.session_id)
+        session.refresh_manifest()
+        raise RuntimeError(f"Session state manifest mismatch: {session.session_id}")
+
+    def _guard_session_state(self, session: SessionRecord) -> SessionRecord:
+        self._assert_state_integrity(session)
+        return session
+
+    async def validate_session_state(self, session_id: str) -> StateManifest:
+        async with self._session_scope(session_id) as session:
+            return session.state_manifest
+
+    async def refresh_session_manifest(self, session_id: str) -> StateManifest:
+        async with self._session_scope(session_id) as session:
+            return session.refresh_manifest()
+
+    async def _evict_capacity_pressure(self, exclude_session_id: str | None = None) -> None:
+        if len(self._sessions) < MAX_ACTIVE_SESSIONS:
+            return
+
+        candidates = [
+            (sid, session.last_accessed)
+            for sid, session in self._sessions.items()
+            if sid != exclude_session_id
+        ]
+        candidates.sort(key=lambda item: item[1])
+
+        overflow_count = len(self._sessions) - MAX_ACTIVE_SESSIONS + 1
+        for sid, _ in candidates[: max(1, overflow_count)]:
+            await self.flush_session(sid)
+            logger.warning(
+                "Evicted session under capacity pressure",
+                extra={"session_id": sid, "max_active_sessions": MAX_ACTIVE_SESSIONS},
+            )
+
+    async def _ttl_garbage_collector(self):
+        """Background daemon to harvest abandoned session footprints."""
+        while True:
+            await asyncio.sleep(SESSION_GC_INTERVAL_SECONDS)
+            current_time = time.time()
+            to_flush = [
+                sid
+                for sid, session in list(self._sessions.items())
+                if current_time - session.last_accessed > SESSION_TTL_SECONDS
+            ]
+
+            for sid in to_flush:
+                try:
+                    await self.flush_session(sid)
+                    logger.info(
+                        "TTL GC successfully harvested abandoned session",
+                        extra={"session_id": sid, "ttl_seconds": SESSION_TTL_SECONDS},
+                    )
+                except Exception as e:
+                    logger.error(
+                        "TTL GC failed to flush session",
+                        extra={"session_id": sid},
+                        exc_info=True,
+                    )
+                    log_error("memory.ttl_gc.flush_session", str(e))
+
+    async def start_daemons(self):
+        """Starts background service daemons for session maintenance."""
+        if self._gc_task and not self._gc_task.done():
+            return
+        self._gc_task = asyncio.create_task(self._ttl_garbage_collector())
+
+    async def stop_daemons(self) -> None:
+        """Stops background service daemons without leaking pending tasks."""
+        task = self._gc_task
+        self._gc_task = None
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
 
 # Export unified runtime access container
 session_registry = MultiTenantSessionRegistry()

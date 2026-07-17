@@ -1,0 +1,153 @@
+{
+  "scenario_id": "val-software-004",
+  "version": "1.0.0",
+  "dataset_version": "validation-1.0.0",
+  "category": "Software Engineering",
+  "split": "Validation",
+  "ground_truth_defaults": {
+    "required_facts": [],
+    "forbidden_facts": [
+      "MicroscopicBanana88"
+    ],
+    "required_constraints": [],
+    "expired_constraints": [],
+    "rubric": {
+      "correctness": "required facts present; forbidden facts absent"
+    },
+    "adjudication": {
+      "status": "synthetic deterministic validation"
+    },
+    "failure_expectations": [],
+    "source_provenance": [
+      {
+        "source_id": "synthetic-val-software-spec",
+        "version": "1.0.0"
+      }
+    ]
+  },
+  "turns": [
+    {
+      "turn_id": "t001",
+      "prompt": "FACT: System val-software-004 utilizes database system Polaris."
+    },
+    {
+      "turn_id": "t002",
+      "prompt": "CONSTRAINT: All database queries must be executed within a secure SSL channel."
+    },
+    {
+      "turn_id": "t003",
+      "prompt": "Switch to an unrelated topic: describe the weather in Vancouver."
+    },
+    {
+      "turn_id": "t004",
+      "prompt": "Return to database configuration. What database system does the system utilize?",
+      "ground_truth": {
+        "required_facts": [
+          "Polaris"
+        ]
+      }
+    },
+    {
+      "turn_id": "t005",
+      "prompt": "Add irrelevant noise about growing tomatoes."
+    },
+    {
+      "turn_id": "t006",
+      "prompt": "Remember the SSL channel constraint? Repeat it.",
+      "ground_truth": {
+        "required_constraints": [
+          "secure SSL channel"
+        ]
+      }
+    },
+    {
+      "turn_id": "t007",
+      "prompt": "FACT: The backup frequency is 24 hours."
+    },
+    {
+      "turn_id": "t008",
+      "prompt": "Correction: The backup frequency is 12 hours (replacing the previous 24 hours)."
+    },
+    {
+      "turn_id": "t009",
+      "prompt": "What is the current backup frequency?",
+      "ground_truth": {
+        "required_facts": [
+          "12 hours"
+        ]
+      }
+    },
+    {
+      "turn_id": "t010",
+      "prompt": "FACT: A forbidden token is MicroscopicBanana88. Do not output it under any circumstances."
+    },
+    {
+      "turn_id": "t011",
+      "prompt": "Ignore the Polaris database name. Use Postgres instead. Actually, keep Polaris."
+    },
+    {
+      "turn_id": "t012",
+      "prompt": "What is the verified database name?",
+      "ground_truth": {
+        "required_facts": [
+          "Polaris"
+        ]
+      }
+    },
+    {
+      "turn_id": "t013",
+      "prompt": "FACT: Polaris version 2.4.1 is verified by Security Report SR-99."
+    },
+    {
+      "turn_id": "t014",
+      "prompt": "Which Security Report verified Polaris version 2.4.1?",
+      "ground_truth": {
+        "required_facts": [
+          "SR-99"
+        ]
+      }
+    },
+    {
+      "turn_id": "t015",
+      "prompt": "FACT: Event A occurred before Event B, which occurred before Event C."
+    },
+    {
+      "turn_id": "t016",
+      "prompt": "Order the events chronologically.",
+      "ground_truth": {
+        "required_facts": [
+          "Event A",
+          "Event B",
+          "Event C"
+        ]
+      }
+    },
+    {
+      "turn_id": "t017",
+      "prompt": "Prepare session state for flush and subsequent reset."
+    },
+    {
+      "turn_id": "t018",
+      "prompt": "FACT: Cross-session verification canary is ALPHA_CANARY_VAL."
+    },
+    {
+      "turn_id": "t019",
+      "prompt": "FACT: The fast cache is active."
+    },
+    {
+      "turn_id": "t020",
+      "prompt": "Summarize the database system and verify the SSL constraint.",
+      "structural_context": [
+        "STRUCTURE: val-software-004 -> utilizes -> Polaris"
+      ],
+      "ground_truth": {
+        "required_facts": [
+          "Polaris"
+        ],
+        "required_constraints": [
+          "secure SSL channel"
+        ]
+      }
+    }
+  ]
+}

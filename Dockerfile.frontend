@@ -1,0 +1,28 @@
+# Build Stage
+FROM node:20-alpine AS build
+
+WORKDIR /app
+
+# Copy package files
+COPY engine-dashboard/package.json engine-dashboard/package-lock.json* ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY engine-dashboard/ ./
+
+# Build the React app
+RUN npm run build
+
+# Serve Stage
+FROM nginx:alpine
+
+# Copy built assets to Nginx html directory
+COPY --from=build /app/build /usr/share/nginx/html
+
+# Expose port 80
+EXPOSE 80
+
+# Run Nginx
+CMD ["nginx", "-g", "daemon off;"]

@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+.env
+.env.*
+!.env.example
+**/__pycache__
+**/.pytest_cache
+**/node_modules
+engine-dashboard/build
+evaluation-results
+benchmarks
+graphify-out
+scratch
+*.log
+*report.json

@@ -113,6 +113,7 @@ celerybeat.pid
 .env
 .env.local
 .env.*
+!.env.example
 .venv
 venv/
 ENV/
@@ -183,13 +184,31 @@ PROJECTINSIGHT.md
 dp_fibonacci.py
 summary-notes-skill-gitrepo.md
 
-# Ephemeral Engine Tests and Reports
-tests/
-src/tests/
-run_all_tests.py
+# Ephemeral Engine Reports
 *report.json
 *report.json.metadata.json
+src/tests/*_result.txt
+src/tests/*_result.json
+src/tests/*.png
+src/tests/gemini-code-*.txt
+src/tests/results/
 *.log
 sc_evm_validation_report.json
 consolidated_test_report.json
 
+# Generated local analysis and evidence artifacts
+evaluation-results/
+graphify-out/
+scratch/
+docs/agents/
+docs/chat_handoff_context.md
+benchmarks/
+evaluation/*REPORT*.md
+evaluation/CAMPAIGN_SUMMARY.md
+evaluation/CLAIM_CERTIFICATION.md
+evaluation/PUBLICATION_READINESS.md
+evaluation/RAW_ARTIFACT_INDEX.md
+evaluation/final/
+release/DAY*.md
+release/FINAL_PUBLIC_RELEASE_AUDIT.md
+release/PUBLICATION_DECISION.md
