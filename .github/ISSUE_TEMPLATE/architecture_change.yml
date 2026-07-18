@@ -1,0 +1,65 @@
+name: Architecture or RFC Change
+description: Propose a significant product, architecture, security, provider, or compatibility decision
+title: "[RFC]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue coordinates a significant decision. The RFC file remains the canonical decision record.
+        Review MANIFESTO.md, PRODUCT_BOUNDARY.md, ARCHITECTURE.md, and rfcs/README.md first.
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision required
+      description: What decision must be made, and why can normal implementation work not resolve it?
+    validations:
+      required: true
+  - type: textarea
+    id: manifesto
+    attributes:
+      label: Manifesto and product-boundary relationship
+      description: Explain how the proposal supports the product philosophy and remains inside scope.
+    validations:
+      required: true
+  - type: input
+    id: rfc_path
+    attributes:
+      label: RFC
+      description: Link the RFC file or write "Not drafted".
+      placeholder: rfcs/RFC-0004-provider-abstraction.md
+    validations:
+      required: true
+  - type: textarea
+    id: current_state
+    attributes:
+      label: Current state and evidence
+      description: Identify the implemented behavior, limitation, or evidence that motivates the decision.
+    validations:
+      required: true
+  - type: textarea
+    id: impacts
+    attributes:
+      label: Security, operational, compatibility, and evidence impact
+      description: Describe material effects and affected trust boundaries.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation and rollback
+      description: How will the decision be tested, and how can it be reversed safely?
+    validations:
+      required: true
+  - type: checkboxes
+    id: governance
+    attributes:
+      label: Governance check
+      options:
+        - label: I reviewed the Product Manifesto.
+          required: true
+        - label: I reviewed the Product Boundary.
+          required: true
+        - label: I reviewed the RFC process and existing accepted RFCs.
+          required: true

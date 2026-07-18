@@ -77,6 +77,9 @@ For a code-derived takeover and clean-room replication reference, see the
 See the [20-Turn, 20-Session Lifecycle](docs/20-TURN-20-SESSION-LIFECYCLE.md) for a
 plain-language explanation of how twenty isolated sessions move through twenty turns each.
 
+For planning work through issues, RFCs, pull requests, and the project board, see the
+[GitHub Projects Operating Guide](docs/GITHUB_PROJECTS_OPERATING_GUIDE.md).
+
 ```
                   ┌──────────────────────────┐
                   │       User Prompt        │
