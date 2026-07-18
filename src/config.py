@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     # NVIDIA API Limits
     NVIDIA_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
     NVIDIA_MAX_RETRIES: int = Field(default=3, ge=0, le=10)
+    NVIDIA_READ_TIMEOUT_SECONDS: float = Field(default=60.0, ge=1.0, le=600.0)
+    NVIDIA_READ_TIMEOUT_RETRIES: int = Field(default=1, ge=0, le=3)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

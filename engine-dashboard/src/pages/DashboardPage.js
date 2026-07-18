@@ -1,117 +1,382 @@
-import React, { useContext } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { Activity, Database, Cpu, Zap } from 'lucide-react';
+import React, { useContext, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  Activity,
+  ArrowRight,
+  Clock3,
+  Database,
+  Gauge,
+  Layers3,
+  MessageSquare,
+  Server,
+  Sparkles,
+} from 'lucide-react';
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { TelemetryContext } from '../App';
 
+const formatNumber = (value) => new Intl.NumberFormat('en-US', {
+  notation: value >= 100000 ? 'compact' : 'standard',
+  maximumFractionDigits: 1,
+}).format(value);
+
+function MetricCard({ label, value, supporting, icon: Icon, tone }) {
+  return (
+    <article className={`metric-card metric-${tone}`}>
+      <div className="metric-heading">
+        <span className="metric-icon" aria-hidden="true"><Icon size={18} /></span>
+        <span>{label}</span>
+      </div>
+      <strong className="metric-value">{value}</strong>
+      <p>{supporting}</p>
+    </article>
+  );
+}
+
+function EmptyChart({ icon: Icon, title, description }) {
+  return (
+    <div className="chart-empty">
+      <span className="empty-icon" aria-hidden="true"><Icon size={22} /></span>
+      <strong>{title}</strong>
+      <p>{description}</p>
+    </div>
+  );
+}
+
+function ChartTooltip({ active, payload, label, valueLabel }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="chart-tooltip">
+      <span>{label}</span>
+      <strong>{valueLabel}: {formatNumber(payload[0].value)}</strong>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
-  const { sessionState } = useContext(TelemetryContext);
+  const { connectionStatus, sessionState } = useContext(TelemetryContext);
+  const [showTables, setShowTables] = useState(false);
 
-  // Transform intent mapping to recharts format
-  const intentData = Object.keys(sessionState.intentDistribution).map(key => ({
-    name: key,
-    value: sessionState.intentDistribution[key]
-  }));
-
-  // Ensure there's at least a fallback if empty
-  const displayTokenData = sessionState.tokenHistory.length > 0 ? sessionState.tokenHistory : [{ time: 'Start', tokens: 0 }];
-  const displayIntentData = intentData.length > 0 ? intentData : [{ name: 'Awaiting Queries', value: 0 }];
-
-  // Calculate Cache Hit Rate
+  const intentData = useMemo(
+    () => Object.entries(sessionState.intentDistribution)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value),
+    [sessionState.intentDistribution],
+  );
+  const tokenData = sessionState.tokenHistory;
   const totalUsed = sessionState.tokensUsed.m1 + sessionState.tokensUsed.m2;
-  const hitRate = totalUsed > 0 ? ((sessionState.tokensSaved / (sessionState.tokensSaved + totalUsed)) * 100).toFixed(1) : "0.0";
+  const totalObserved = sessionState.tokensSaved + totalUsed;
+  const efficiencyRate = totalObserved > 0
+    ? (sessionState.tokensSaved / totalObserved) * 100
+    : 0;
+  const lastTokenPoint = tokenData[tokenData.length - 1];
 
   return (
-    <div className="flex-1 overflow-y-auto p-8 bg-gray-950 flex flex-col gap-8">
-      <header>
-        <h2 className="text-2xl font-bold text-gray-100">Analytics Overview</h2>
-        <p className="text-sm text-gray-500 mt-1">Real-time system telemetry and resource savings.</p>
-      </header>
+    <div className="page dashboard-page">
+      <section className="overview-hero" aria-labelledby="overview-heading">
+        <div className="hero-copy">
+          <span className="eyebrow">Runtime overview</span>
+          <h2 id="overview-heading">Context you can see, control, and remove.</h2>
+          <p>
+            Monitor how each session narrows context before reasoning, then move directly into
+            the workspace when intervention is needed.
+          </p>
+          <div className="hero-actions">
+            <Link className="button button-primary" to="/chat">
+              Open workspace <ArrowRight size={16} aria-hidden="true" />
+            </Link>
+            <span className={`service-state service-${connectionStatus}`}>
+              <span className="status-dot" aria-hidden="true" />
+              {connectionStatus === 'online' ? 'Runtime available' : 'Runtime unavailable'}
+            </span>
+          </div>
+        </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 shadow-lg">
-          <div className="flex justify-between items-start">
+        <div className="hero-system-card" aria-label="Current runtime state">
+          <div className="system-card-header">
+            <span><Server size={16} aria-hidden="true" /> Live session</span>
+            <span className="live-indicator"><span aria-hidden="true" /> live</span>
+          </div>
+          <dl className="system-list">
             <div>
-              <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Total Tokens Saved</p>
-              <h3 className="text-2xl font-bold text-emerald-400 mt-1">{sessionState.tokensSaved.toLocaleString()}</h3>
+              <dt>Active session</dt>
+              <dd>{sessionState.activeSessionId || 'Waiting for runtime'}</dd>
             </div>
-            <div className="p-2 bg-emerald-900/20 rounded text-emerald-500"><Database size={20}/></div>
-          </div>
-        </div>
-
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 shadow-lg">
-          <div className="flex justify-between items-start">
             <div>
-              <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Last Request Latency</p>
-              <h3 className="text-2xl font-bold text-purple-400 mt-1">
-                {sessionState.lastLatencyMs === null ? 'Not measured' : `${sessionState.lastLatencyMs}ms`}
-              </h3>
+              <dt>Lifecycle state</dt>
+              <dd>{sessionState.phase.replaceAll('_', ' ')}</dd>
             </div>
-            <div className="p-2 bg-purple-900/20 rounded text-purple-500"><Activity size={20}/></div>
-          </div>
-        </div>
-
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 shadow-lg">
-          <div className="flex justify-between items-start">
             <div>
-              <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Active Tenants</p>
-              <h3 className="text-2xl font-bold text-blue-400 mt-1">{sessionState.sessions.length}</h3>
+              <dt>Memory anchors</dt>
+              <dd>{sessionState.memoryAnchors.length}</dd>
             </div>
-            <div className="p-2 bg-blue-900/20 rounded text-blue-500"><Cpu size={20}/></div>
-          </div>
-        </div>
-
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 shadow-lg">
-          <div className="flex justify-between items-start">
+          </dl>
+          <div className="context-meter">
             <div>
-              <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Cache Hit Rate</p>
-              <h3 className="text-2xl font-bold text-amber-400 mt-1">{hitRate}%</h3>
+              <span>Context efficiency</span>
+              <strong>{efficiencyRate.toFixed(1)}%</strong>
             </div>
-            <div className="p-2 bg-amber-900/20 rounded text-amber-500"><Zap size={20}/></div>
+            <span className="meter-track" aria-hidden="true">
+              <span style={{ width: `${Math.min(efficiencyRate, 100)}%` }} />
+            </span>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-[400px]">
-        {/* Line Chart */}
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 shadow-lg flex flex-col">
-          <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-6">Cumulative Tokens Saved (SC-EVM)</h3>
-          <div className="flex-1 w-full min-h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={displayTokenData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
-                <XAxis dataKey="time" stroke="#4b5563" tick={{fill: '#9ca3af', fontSize: 12}} />
-                <YAxis stroke="#4b5563" tick={{fill: '#9ca3af', fontSize: 12}} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#111827', borderColor: '#374151', color: '#f3f4f6' }}
-                  itemStyle={{ color: '#34d399' }}
-                />
-                <Line type="monotone" dataKey="tokens" stroke="#10b981" strokeWidth={3} dot={{r: 4, fill: '#10b981', strokeWidth: 0}} activeDot={{r: 6}} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+      <section className="metrics-grid" aria-label="Session metrics">
+        <MetricCard
+          icon={Database}
+          label="Tokens removed"
+          supporting="Kept outside active model context"
+          tone="primary"
+          value={formatNumber(sessionState.tokensSaved)}
+        />
+        <MetricCard
+          icon={Clock3}
+          label="Last response"
+          supporting="End-to-end request latency"
+          tone="accent"
+          value={sessionState.lastLatencyMs === null
+            ? 'No data'
+            : `${formatNumber(sessionState.lastLatencyMs)} ms`}
+        />
+        <MetricCard
+          icon={Layers3}
+          label="Active sessions"
+          supporting="Isolated working contexts"
+          tone="secondary"
+          value={formatNumber(sessionState.sessions.length)}
+        />
+        <MetricCard
+          icon={Gauge}
+          label="Context efficiency"
+          supporting={`${formatNumber(totalUsed)} tokens sent to models`}
+          tone="neutral"
+          value={`${efficiencyRate.toFixed(1)}%`}
+        />
+      </section>
 
-        {/* Bar Chart */}
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 shadow-lg flex flex-col">
-          <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-6">Intent Distribution (Model 1 Gating)</h3>
-          <div className="flex-1 w-full min-h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={displayIntentData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
-                <XAxis dataKey="name" stroke="#4b5563" tick={{fill: '#9ca3af', fontSize: 12}} />
-                <YAxis stroke="#4b5563" tick={{fill: '#9ca3af', fontSize: 12}} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#111827', borderColor: '#374151', color: '#f3f4f6' }}
-                  cursor={{fill: '#1f2937'}}
-                />
-                <Bar dataKey="value" fill="#a855f7" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+      <section className="analytics-grid" aria-label="Telemetry charts">
+        <article className="panel chart-panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Context trend</span>
+              <h3>Tokens removed over time</h3>
+            </div>
+            <span className="panel-stat">
+              {lastTokenPoint ? formatNumber(lastTokenPoint.tokens) : 'Awaiting data'}
+            </span>
           </div>
-        </div>
-      </div>
+          <p className="panel-description">
+            Cumulative context excluded from model requests in this runtime.
+          </p>
+          <div
+            className="chart-container"
+            role="img"
+            aria-label="Line chart showing cumulative tokens removed over time"
+          >
+            {tokenData.length > 1 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={tokenData} margin={{ top: 12, right: 8, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="tokenGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--chart-primary)" stopOpacity={0.28} />
+                      <stop offset="100%" stopColor="var(--chart-primary)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="4 4" vertical={false} />
+                  <XAxis
+                    axisLine={false}
+                    dataKey="time"
+                    tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }}
+                    tickFormatter={formatNumber}
+                    tickLine={false}
+                  />
+                  <Tooltip content={<ChartTooltip valueLabel="Tokens removed" />} />
+                  <Area
+                    dataKey="tokens"
+                    fill="url(#tokenGradient)"
+                    isAnimationActive={false}
+                    stroke="var(--chart-primary)"
+                    strokeWidth={2.5}
+                    type="monotone"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyChart
+                description="Run two or more requests to reveal the context trend."
+                icon={Activity}
+                title="No trend yet"
+              />
+            )}
+          </div>
+        </article>
+
+        <article className="panel chart-panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Request mix</span>
+              <h3>Intent distribution</h3>
+            </div>
+            <span className="panel-stat">
+              {intentData.length ? `${intentData.length} intents` : 'Awaiting data'}
+            </span>
+          </div>
+          <p className="panel-description">
+            Requests grouped by the intent observed during orchestration.
+          </p>
+          <div
+            className="chart-container"
+            role="img"
+            aria-label="Bar chart comparing observed request intents"
+          >
+            {intentData.length ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={intentData} margin={{ top: 12, right: 8, left: -20, bottom: 0 }}>
+                  <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="4 4" vertical={false} />
+                  <XAxis
+                    axisLine={false}
+                    dataKey="name"
+                    tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    allowDecimals={false}
+                    axisLine={false}
+                    tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <Tooltip content={<ChartTooltip valueLabel="Requests" />} cursor={false} />
+                  <Bar
+                    dataKey="value"
+                    fill="var(--chart-secondary)"
+                    isAnimationActive={false}
+                    radius={[5, 5, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyChart
+                description="Intent categories appear after the first completed request."
+                icon={Sparkles}
+                title="No requests classified"
+              />
+            )}
+          </div>
+        </article>
+      </section>
+
+      <section className="details-grid">
+        <article className="panel flow-panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Session lifecycle</span>
+              <h3>One controlled path</h3>
+            </div>
+          </div>
+          <ol className="lifecycle-flow">
+            <li>
+              <span>01</span>
+              <div><strong>Receive</strong><p>A request enters an isolated session.</p></div>
+            </li>
+            <li>
+              <span>02</span>
+              <div><strong>Ground</strong><p>Only relevant working context is assembled.</p></div>
+            </li>
+            <li>
+              <span>03</span>
+              <div><strong>Reason</strong><p>The model works from a bounded evidence set.</p></div>
+            </li>
+            <li>
+              <span>04</span>
+              <div><strong>Burn</strong><p>Temporary state is removed on command.</p></div>
+            </li>
+          </ol>
+        </article>
+
+        <article className="panel activity-panel">
+          <div className="panel-header">
+            <div>
+              <span className="eyebrow">Current workload</span>
+              <h3>Runtime snapshot</h3>
+            </div>
+            <Link className="text-link" to="/chat">
+              Inspect <ArrowRight size={14} aria-hidden="true" />
+            </Link>
+          </div>
+          <dl className="snapshot-list">
+            <div>
+              <dt><MessageSquare size={15} aria-hidden="true" /> Messages</dt>
+              <dd>{sessionState.chatHistory.length}</dd>
+            </div>
+            <div>
+              <dt><Database size={15} aria-hidden="true" /> Memory anchors</dt>
+              <dd>{sessionState.memoryAnchors.length}</dd>
+            </div>
+            <div>
+              <dt><Activity size={15} aria-hidden="true" /> Runtime events</dt>
+              <dd>{sessionState.systemLogs.length}</dd>
+            </div>
+          </dl>
+        </article>
+      </section>
+
+      {(tokenData.length > 1 || intentData.length > 0) && (
+        <section className="data-disclosure">
+          <button
+            aria-expanded={showTables}
+            className="text-link"
+            onClick={() => setShowTables((current) => !current)}
+            type="button"
+          >
+            {showTables ? 'Hide accessible data tables' : 'Show accessible data tables'}
+          </button>
+          {showTables && (
+            <div className="table-grid">
+              <div className="data-table-wrap">
+                <table>
+                  <caption>Tokens removed over time</caption>
+                  <thead><tr><th>Time</th><th>Tokens</th></tr></thead>
+                  <tbody>
+                    {tokenData.map((point, index) => (
+                      <tr key={`${point.time}-${index}`}>
+                        <td>{point.time}</td>
+                        <td>{point.tokens.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="data-table-wrap">
+                <table>
+                  <caption>Request intent distribution</caption>
+                  <thead><tr><th>Intent</th><th>Requests</th></tr></thead>
+                  <tbody>
+                    {intentData.map((intent) => (
+                      <tr key={intent.name}><td>{intent.name}</td><td>{intent.value}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
