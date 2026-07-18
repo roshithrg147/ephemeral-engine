@@ -1,0 +1,60 @@
+name: Engineering Task
+description: Track a bounded implementation, testing, documentation, or operational task
+title: "[Task]: "
+body:
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: What single outcome must this task produce?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and evidence
+      description: Link relevant issues, RFCs, source files, failures, or reports.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: In scope
+      placeholder: |
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Out of scope
+      placeholder: |
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: List tests, builds, reviews, or evidence required.
+    validations:
+      required: true
+  - type: dropdown
+    id: rfc
+    attributes:
+      label: RFC status
+      options:
+        - Not required
+        - Accepted RFC linked above
+        - To determine before Ready
+    validations:
+      required: true

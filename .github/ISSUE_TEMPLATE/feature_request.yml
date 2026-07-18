@@ -1,0 +1,69 @@
+name: Feature Request
+description: Propose a product capability or improvement
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem and desired outcome before proposing implementation.
+        Significant product or architecture changes require an RFC.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What concrete user or system problem exists?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: What observations, failures, or user needs demonstrate this problem?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe observable success without prescribing unnecessary implementation.
+    validations:
+      required: true
+  - type: dropdown
+    id: pillar
+    attributes:
+      label: Product pillar
+      options:
+        - Relevance
+        - Isolation
+        - Control
+        - Evidence
+        - To determine during triage
+    validations:
+      required: true
+  - type: dropdown
+    id: rfc
+    attributes:
+      label: Does this require an RFC?
+      options:
+        - To determine during triage
+        - "Yes"
+        - "No"
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List the observable conditions that must be true for this work to be complete.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and non-goals
+      description: Note security, privacy, compatibility, evidence, or scope concerns.
