@@ -1,48 +1,70 @@
 import React from 'react';
+import { Activity, LayoutDashboard, MessageSquare, Orbit } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, MessageSquare } from 'lucide-react';
 
-export default function Navigation() {
+const navItems = [
+  { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/chat', label: 'Workspace', icon: MessageSquare, end: false },
+];
+
+function NavigationLink({ item, mobile = false }) {
+  const Icon = item.icon;
   return (
-    <nav className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col h-screen shrink-0">
-      <div className="p-6 border-b border-gray-800">
-        <h1 className="text-xl font-bold text-emerald-400 tracking-wider">SC-EVM</h1>
-        <p className="text-xs text-gray-500 mt-1">Control Plane</p>
-      </div>
-      
-      <div className="flex-1 py-4 flex flex-col gap-2 px-3">
-        <NavLink 
-          to="/"
-          className={({ isActive }) => 
-            `flex items-center gap-3 px-4 py-3 rounded-md transition-colors ${
-              isActive 
-                ? 'bg-emerald-900/20 text-emerald-400 border border-emerald-800/50' 
-                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-            }`
-          }
-        >
-          <LayoutDashboard size={18} />
-          <span className="font-medium text-sm">Analytics</span>
-        </NavLink>
-        
-        <NavLink 
-          to="/chat"
-          className={({ isActive }) => 
-            `flex items-center gap-3 px-4 py-3 rounded-md transition-colors ${
-              isActive 
-                ? 'bg-emerald-900/20 text-emerald-400 border border-emerald-800/50' 
-                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-            }`
-          }
-        >
-          <MessageSquare size={18} />
-          <span className="font-medium text-sm">Interactive Terminal</span>
-        </NavLink>
-      </div>
+    <NavLink
+      end={item.end}
+      to={item.to}
+      className={({ isActive }) => [
+        mobile ? 'mobile-nav-link' : 'nav-link',
+        isActive ? 'is-active' : '',
+      ].filter(Boolean).join(' ')}
+    >
+      <Icon size={mobile ? 19 : 18} strokeWidth={1.8} aria-hidden="true" />
+      <span>{item.label}</span>
+    </NavLink>
+  );
+}
 
-      <div className="p-4 border-t border-gray-800 text-xs text-gray-600 text-center">
-        v2.1.4 (Ephemeral Build)
-      </div>
-    </nav>
+export default function Navigation({ connectionStatus }) {
+  return (
+    <>
+      <aside className="sidebar" aria-label="Primary navigation">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            <Orbit size={22} strokeWidth={1.8} />
+          </span>
+          <span>
+            <strong>SC-EVM</strong>
+            <small>Control plane</small>
+          </span>
+        </div>
+
+        <nav className="sidebar-nav">
+          <p className="nav-section-label">Workspace</p>
+          {navItems.map((item) => <NavigationLink item={item} key={item.to} />)}
+        </nav>
+
+        <div className="sidebar-footer">
+          <div className={`connection-card connection-${connectionStatus}`}>
+            <Activity size={16} aria-hidden="true" />
+            <span>
+              <strong>
+                {connectionStatus === 'online'
+                  ? 'Backend connected'
+                  : connectionStatus === 'connecting'
+                    ? 'Connecting'
+                    : 'Backend offline'}
+              </strong>
+              <small>Local control channel</small>
+            </span>
+            <span className="connection-dot" aria-hidden="true" />
+          </div>
+          <p>Ephemeral by design</p>
+        </div>
+      </aside>
+
+      <nav className="mobile-nav" aria-label="Primary navigation">
+        {navItems.map((item) => <NavigationLink item={item} key={item.to} mobile />)}
+      </nav>
+    </>
   );
 }

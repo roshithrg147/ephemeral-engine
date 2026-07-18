@@ -1,628 +1,799 @@
-import React, { useState, useEffect, useRef, useContext } from 'react';
+import React, {
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  AlertCircle,
+  Check,
+  Clipboard,
+  Code2,
+  Copy,
+  Database,
+  FileCode2,
+  Flame,
+  FolderKanban,
+  Layers3,
+  LoaderCircle,
+  MessageSquare,
+  PanelRight,
+  Plus,
+  Send,
+  ServerCog,
+  Square,
+  Trash2,
+} from 'lucide-react';
 import { TelemetryContext } from '../App';
-import { Terminal, Cpu, Play, Layers, Copy, Check, FileCode, AlertCircle, Plus, Trash2, FolderKanban, MessageSquare } from 'lucide-react';
 import { parseSseFrame, splitSseFrames } from '../sse';
 
 const MAX_TELEMETRY_POINTS = 200;
 const appendBounded = (items, item) => [...items, item].slice(-MAX_TELEMETRY_POINTS);
 
+function SessionDialog({ open, mode, sessionId, busy, error, onClose, onConfirm }) {
+  const [name, setName] = useState('');
+  const inputRef = useRef(null);
+  const dialogRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setName('');
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape' && !busy) onClose();
+      if (event.key !== 'Tab') return;
+      const focusable = dialogRef.current?.querySelectorAll(
+        'button:not(:disabled), input:not(:disabled)',
+      );
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [busy, onClose, open]);
+
+  if (!open) return null;
+  const isCreate = mode === 'create';
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    onConfirm(isCreate ? name : sessionId);
+  };
+
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={busy ? undefined : onClose}>
+      <form
+        aria-describedby="session-dialog-description"
+        aria-labelledby="session-dialog-title"
+        aria-modal="true"
+        className="dialog-card"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={handleSubmit}
+        ref={dialogRef}
+        role="dialog"
+      >
+        <div className={`dialog-icon ${isCreate ? 'dialog-icon-primary' : 'dialog-icon-danger'}`}>
+          {isCreate ? <Plus size={22} /> : <Flame size={22} />}
+        </div>
+        <div>
+          <h2 className="dialog-title" id="session-dialog-title">
+            {isCreate ? 'Create a session' : 'Burn this session?'}
+          </h2>
+          <p className="dialog-description" id="session-dialog-description">
+            {isCreate
+              ? 'Use a short identifier for this isolated working context.'
+              : `All temporary context in “${sessionId}” will be permanently removed.`}
+          </p>
+        </div>
+        {isCreate && (
+          <div className="field-group">
+            <label htmlFor="session-name">Session name</label>
+            <input
+              aria-describedby={error ? 'session-name-error' : 'session-name-help'}
+              aria-invalid={Boolean(error)}
+              autoComplete="off"
+              className="text-input"
+              id="session-name"
+              maxLength={64}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="architecture-review"
+              ref={inputRef}
+              required
+              type="text"
+              value={name}
+            />
+            <small id="session-name-help">Letters, numbers, hyphens, and underscores.</small>
+            {error && <p className="field-error" id="session-name-error" role="alert">{error}</p>}
+          </div>
+        )}
+        <div className="dialog-actions">
+          <button className="button button-secondary" disabled={busy} onClick={onClose} type="button">
+            Cancel
+          </button>
+          <button
+            className={`button ${isCreate ? 'button-primary' : 'button-danger'}`}
+            disabled={busy || (isCreate && !name.trim())}
+            type="submit"
+          >
+            {busy && <span className="spinner" aria-hidden="true" />}
+            {busy ? 'Working…' : isCreate ? 'Create session' : 'Burn session'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function EmptyState({ icon: Icon, title, description }) {
+  return (
+    <div className="workspace-empty">
+      <span className="empty-icon" aria-hidden="true"><Icon size={22} /></span>
+      <strong>{title}</strong>
+      <p>{description}</p>
+    </div>
+  );
+}
+
+function formatEventLabel(value) {
+  return String(value || 'event').replaceAll('_', ' ');
+}
+
 export default function ChatPage() {
-  const { sessionState, setSessionState } = useContext(TelemetryContext);
+  const {
+    apiUrl,
+    burnSession,
+    refreshSessions,
+    sessionState,
+    setNotice,
+    setSessionState,
+  } = useContext(TelemetryContext);
   const [activeStream, setActiveStream] = useState('');
   const [inputQuery, setInputQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState(null);
+  const [inspectorTab, setInspectorTab] = useState('context');
+  const [sessionDialog, setSessionDialog] = useState(null);
+  const [dialogError, setDialogError] = useState('');
+  const [dialogBusy, setDialogBusy] = useState(false);
 
   const streamEndRef = useRef(null);
-  const logsEndRef = useRef(null);
-  const contextEndRef = useRef(null);
+  const promptRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
-  const API_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000';
+  const scrollToStreamEnd = () => {
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    streamEndRef.current?.scrollIntoView?.({ behavior: reducedMotion ? 'auto' : 'smooth' });
+  };
 
-  useEffect(() => {
-    streamEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeStream, sessionState.chatHistory]);
-
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [sessionState.systemLogs]);
+  useEffect(scrollToStreamEnd, [activeStream, sessionState.chatHistory]);
 
   useEffect(() => {
-    contextEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [sessionState.systemLogs]);
-
-  // Fetch session history when active session changes
-  useEffect(() => {
-    if (!sessionState.activeSessionId) return;
+    if (!sessionState.activeSessionId) return undefined;
+    const controller = new AbortController();
 
     const fetchSessionHistory = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/session/history/${sessionState.activeSessionId}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.status === 'success') {
-            setSessionState(prev => ({
-              ...prev,
-              chatHistory: data.data || [],
-              systemLogs: [], // Reset logs for fresh session context
-              memoryAnchors: [] // Reset anchors to fetch clean state
-            }));
-          }
+        const response = await fetch(
+          `${apiUrl}/api/session/history/${encodeURIComponent(sessionState.activeSessionId)}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) throw new Error(`History request failed (${response.status})`);
+        const payload = await response.json();
+        if (payload.status === 'success') {
+          setSessionState((previous) => ({
+            ...previous,
+            chatHistory: Array.isArray(payload.data) ? payload.data : [],
+            memoryAnchors: [],
+            systemLogs: [],
+          }));
         }
-      } catch (e) {
-        console.error("Failed to fetch session history:", e);
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          setNotice(`Could not load session history. ${error.message}.`);
+        }
       }
     };
 
     fetchSessionHistory();
-  }, [sessionState.activeSessionId, API_URL, setSessionState]);
+    return () => controller.abort();
+  }, [apiUrl, sessionState.activeSessionId, setNotice, setSessionState]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!inputQuery || !sessionState.activeSessionId) return;
-    
-    const currentQuery = inputQuery;
+  useEffect(() => () => abortControllerRef.current?.abort(), []);
+
+  const updateFromEvent = (event, data, accumulatedRef) => {
+    if (data === '[DONE]') return;
+
+    if (event === 'token' || event === 'response_content') {
+      let content = data;
+      try {
+        content = JSON.parse(data);
+      } catch {
+        // Plain text SSE payloads are valid.
+      }
+      if (typeof content === 'string') {
+        accumulatedRef.current = event === 'response_content'
+          ? content
+          : accumulatedRef.current + content;
+        setActiveStream(accumulatedRef.current);
+      }
+      return;
+    }
+
+    if (event === 'metadata') {
+      try {
+        const metadata = JSON.parse(data);
+        setSessionState((previous) => {
+          const tokensSaved = metadata.tokensSaved ?? previous.tokensSaved;
+          const time = new Date().toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          });
+          return {
+            ...previous,
+            memoryAnchors: metadata.memoryAnchors || [],
+            tokenHistory: appendBounded(previous.tokenHistory, { time, tokens: tokensSaved }),
+            tokensSaved,
+          };
+        });
+      } catch {
+        // Ignore malformed optional telemetry without interrupting the response.
+      }
+      return;
+    }
+
+    if (event === 'token_usage') {
+      try {
+        const usage = JSON.parse(data);
+        setSessionState((previous) => ({
+          ...previous,
+          tokensUsed: {
+            m1: previous.tokensUsed.m1 + Number(usage.m1 || 0),
+            m2: previous.tokensUsed.m2 + Number(usage.m2 || 0),
+          },
+        }));
+      } catch {
+        // Ignore malformed optional telemetry without interrupting the response.
+      }
+      return;
+    }
+
+    if (event === 'intent') {
+      try {
+        const intent = JSON.parse(data);
+        setSessionState((previous) => ({
+          ...previous,
+          intentDistribution: {
+            ...previous.intentDistribution,
+            [intent]: (previous.intentDistribution[intent] || 0) + 1,
+          },
+        }));
+      } catch {
+        // Ignore malformed optional telemetry without interrupting the response.
+      }
+      return;
+    }
+
+    let parsed = data;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      // Preserve unstructured events as text for operator inspection.
+    }
+    setSessionState((previous) => ({
+      ...previous,
+      systemLogs: appendBounded(previous.systemLogs, { type: event, data: parsed }),
+    }));
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const currentQuery = inputQuery.trim();
+    if (!currentQuery || !sessionState.activeSessionId || isProcessing) return;
+
     const requestStarted = performance.now();
+    const controller = new AbortController();
+    const accumulatedRef = { current: '' };
+    abortControllerRef.current = controller;
     setInputQuery('');
     setIsProcessing(true);
-    setSessionState(prev => ({ 
-      ...prev, 
-      chatHistory: appendBounded(prev.chatHistory, { role: 'user', content: currentQuery })
-    }));
     setActiveStream('');
-    
+    setSessionState((previous) => ({
+      ...previous,
+      phase: 'STREAMING_RESPONSE',
+      chatHistory: appendBounded(
+        previous.chatHistory,
+        { role: 'user', content: currentQuery },
+      ),
+    }));
+
     try {
-      setSessionState(prev => ({ ...prev, phase: 'Streaming Response' }));
-      
-      const response = await fetch(`${API_URL}/api/agent/query`, {
+      const response = await fetch(`${apiUrl}/api/agent/query`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json', 
-          'Accept': 'text/event-stream' 
+        headers: {
+          Accept: 'text/event-stream',
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ prompt: currentQuery, session_id: sessionState.activeSessionId })
+        body: JSON.stringify({
+          prompt: currentQuery,
+          session_id: sessionState.activeSessionId,
+        }),
+        signal: controller.signal,
       });
 
-      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+      if (!response.ok) throw new Error(`Runtime returned ${response.status}`);
+      if (!response.body) throw new Error('Streaming is unavailable in this browser');
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let accumulatedStream = '';
       let sseBuffer = '';
-
-      const handleFrame = ({ event, data }) => {
-        if (data === '[DONE]') return;
-
-        if (event === 'token' || event === 'response_content') {
-          let content;
-          try {
-            content = JSON.parse(data);
-          } catch {
-            content = data;
-          }
-          if (typeof content === 'string') {
-            accumulatedStream = event === 'response_content'
-              ? content
-              : accumulatedStream + content;
-            setActiveStream(accumulatedStream);
-          }
-          return;
-        }
-
-        if (event === 'metadata') {
-          try {
-            const meta = JSON.parse(data);
-            setSessionState(prev => {
-              const tokensSaved = meta.tokensSaved ?? prev.tokensSaved;
-              const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
-              return {
-                ...prev,
-                tokensSaved,
-                memoryAnchors: meta.memoryAnchors || [],
-                tokenHistory: appendBounded(prev.tokenHistory, { time, tokens: tokensSaved })
-              };
-            });
-          } catch {}
-          return;
-        }
-
-        if (event === 'token_usage') {
-          try {
-            const usage = JSON.parse(data);
-            setSessionState(prev => ({
-              ...prev,
-              tokensUsed: {
-                m1: prev.tokensUsed.m1 + Number(usage.m1 || 0),
-                m2: prev.tokensUsed.m2 + Number(usage.m2 || 0)
-              }
-            }));
-          } catch {}
-          return;
-        }
-
-        if (event === 'intent') {
-          try {
-            const intent = JSON.parse(data);
-            setSessionState(prev => ({
-              ...prev,
-              intentDistribution: {
-                ...prev.intentDistribution,
-                [intent]: (prev.intentDistribution[intent] || 0) + 1
-              }
-            }));
-          } catch {}
-          return;
-        }
-
-        try {
-          const parsed = JSON.parse(data);
-          setSessionState(prev => ({
-            ...prev,
-            systemLogs: appendBounded(prev.systemLogs, { type: event, data: parsed })
-          }));
-        } catch (error) {
-          console.error("Failed to parse event data", data, error);
-        }
-      };
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-
         const parsed = splitSseFrames(sseBuffer, decoder.decode(value, { stream: true }));
         sseBuffer = parsed.remainder;
-        parsed.frames.forEach(handleFrame);
+        parsed.frames.forEach((frame) => updateFromEvent(
+          frame.event,
+          frame.data,
+          accumulatedRef,
+        ));
       }
 
       sseBuffer += decoder.decode();
       if (sseBuffer.trim()) {
         const finalFrame = parseSseFrame(sseBuffer);
-        if (finalFrame) handleFrame(finalFrame);
+        if (finalFrame) updateFromEvent(finalFrame.event, finalFrame.data, accumulatedRef);
       }
-      
-      if (accumulatedStream) {
-        setSessionState(prev => ({
-          ...prev,
-          chatHistory: appendBounded(prev.chatHistory, { role: 'assistant', content: accumulatedStream })
+
+      if (accumulatedRef.current) {
+        setSessionState((previous) => ({
+          ...previous,
+          chatHistory: appendBounded(
+            previous.chatHistory,
+            { role: 'assistant', content: accumulatedRef.current },
+          ),
         }));
       }
-      setActiveStream('');
-      
     } catch (error) {
-      console.error("Stream Error:", error);
-      setSessionState(prev => ({
-        ...prev,
-        systemLogs: appendBounded(prev.systemLogs, { type: 'error', data: error.message })
-      }));
+      if (error.name === 'AbortError') {
+        setNotice('Response generation stopped.');
+      } else {
+        setSessionState((previous) => ({
+          ...previous,
+          systemLogs: appendBounded(
+            previous.systemLogs,
+            { type: 'error', data: error.message },
+          ),
+        }));
+        setNotice(`Response failed. ${error.message}.`);
+        setInspectorTab('events');
+      }
     } finally {
+      abortControllerRef.current = null;
+      setActiveStream('');
       setIsProcessing(false);
-      setSessionState(prev => ({
-        ...prev,
+      setSessionState((previous) => ({
+        ...previous,
+        lastLatencyMs: Math.round(performance.now() - requestStarted),
         phase: 'IDLE',
-        lastLatencyMs: Math.round(performance.now() - requestStarted)
       }));
+      window.setTimeout(() => promptRef.current?.focus(), 0);
     }
   };
 
-  const handleCreateSession = async () => {
-    const sessionName = prompt("Enter a unique name/ID for the new session:");
-    if (!sessionName) return;
-    const cleanName = sessionName.trim().replace(/\s+/g, '_').toLowerCase();
-    if (!cleanName) return;
-    
-    if (sessionState.sessions.includes(cleanName)) {
-      alert("A session with this ID already exists!");
+  const stopGeneration = () => abortControllerRef.current?.abort();
+
+  const openCreateDialog = () => {
+    setDialogError('');
+    setSessionDialog({ mode: 'create' });
+  };
+
+  const handleDialogConfirm = async (value) => {
+    if (!sessionDialog) return;
+    setDialogError('');
+    setDialogBusy(true);
+
+    if (sessionDialog.mode === 'delete') {
+      const burned = await burnSession(sessionDialog.sessionId);
+      if (burned) setSessionDialog(null);
+      setDialogBusy(false);
       return;
     }
-    
+
+    const cleanName = value.trim().replace(/\s+/g, '-').toLowerCase();
+    if (!/^[a-z0-9_-]+$/.test(cleanName)) {
+      setDialogError('Use only letters, numbers, hyphens, and underscores.');
+      setDialogBusy(false);
+      return;
+    }
+    if (sessionState.sessions.includes(cleanName)) {
+      setDialogError('A session with this name already exists.');
+      setDialogBusy(false);
+      return;
+    }
+
     try {
-      const res = await fetch(`${API_URL}/api/session/initialize`, {
+      const response = await fetch(`${apiUrl}/api/session/initialize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: cleanName })
+        body: JSON.stringify({ session_id: cleanName }),
       });
-      if (res.ok) {
-        setSessionState(prev => ({
-          ...prev,
-          sessions: [...prev.sessions, cleanName],
-          activeSessionId: cleanName
-        }));
-      }
-    } catch (e) {
-      console.error("Failed to initialize session:", e);
+      if (!response.ok) throw new Error(`Runtime returned ${response.status}`);
+      await refreshSessions(cleanName);
+      setSessionDialog(null);
+      setNotice(`Session ${cleanName} is ready.`);
+    } catch (error) {
+      setDialogError(`Could not create the session. ${error.message}.`);
+    } finally {
+      setDialogBusy(false);
     }
   };
 
-  const handleDeleteSession = async (sessionId, e) => {
-    e.stopPropagation();
-    if (!window.confirm(`Are you sure you want to /burn session "${sessionId}"?`)) return;
-    
+  const handleCopyCode = async (code, index) => {
     try {
-      const res = await fetch(`${API_URL}/api/session/burn/${sessionId}`, { method: 'DELETE' });
-      if (res.ok) {
-        const listRes = await fetch(`${API_URL}/api/session/list`);
-        if (listRes.ok) {
-          const listData = await listRes.json();
-          const remainingSessions = listData.data || [];
-          
-          if (remainingSessions.length === 0) {
-            const defaultSession = 'session_1';
-            await fetch(`${API_URL}/api/session/initialize`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ session_id: defaultSession })
-            });
-            setSessionState(prev => ({
-              ...prev,
-              sessions: [defaultSession],
-              activeSessionId: defaultSession,
-              chatHistory: [],
-              systemLogs: []
-            }));
-          } else {
-            const nextActive = sessionId === sessionState.activeSessionId ? remainingSessions[0] : sessionState.activeSessionId;
-            setSessionState(prev => ({
-              ...prev,
-              sessions: remainingSessions,
-              activeSessionId: nextActive
-            }));
-          }
-        }
-      }
-    } catch (e) {
-      console.error("Failed to delete session:", e);
+      await navigator.clipboard.writeText(code);
+      setCopiedIndex(index);
+      window.setTimeout(() => setCopiedIndex(null), 2000);
+    } catch {
+      setNotice('Clipboard access was unavailable.');
     }
   };
 
-  const handleCopyCode = (code, index) => {
-    navigator.clipboard.writeText(code);
-    setCopiedIndex(index);
-    setTimeout(() => setCopiedIndex(null), 2000);
-  };
-
-  const renderMessageContent = (content, messageIdx) => {
+  const renderMessageContent = (content, messageIndex) => {
     if (!content) return null;
     const parts = content.split(/(```[\s\S]*?```)/g);
-    
-    return parts.map((part, partIdx) => {
-      const globalIdx = `${messageIdx}-${partIdx}`;
-      if (part.startsWith('```') && part.endsWith('```')) {
-        const match = part.match(/```(\w*)\n([\s\S]*?)```/);
-        const language = match ? match[1] : 'code';
-        const code = match ? match[2] : part.slice(3, -3);
-        
-        return (
-          <div key={globalIdx} className="my-3 rounded-lg overflow-hidden border border-gray-800/80 bg-gray-950/80 font-mono text-xs shadow-2xl transition-all duration-300 hover:border-emerald-500/30">
-            <div className="flex justify-between items-center bg-gray-900/60 px-4 py-2 border-b border-gray-800/80 text-gray-400">
-              <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-400 flex items-center gap-1.5">
-                <FileCode size={12} /> {language || 'code'}
-              </span>
-              <button 
-                onClick={() => handleCopyCode(code, globalIdx)}
-                className="text-[10px] hover:text-emerald-400 transition-colors uppercase font-bold tracking-widest cursor-pointer flex items-center gap-1"
-              >
-                {copiedIndex === globalIdx ? (
-                  <>
-                    <Check size={12} className="text-emerald-400 animate-scale" />
-                    <span className="text-emerald-400">Copied</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy size={12} />
-                    <span>Copy</span>
-                  </>
-                )}
-              </button>
-            </div>
-            <pre className="p-4 overflow-x-auto text-gray-300 whitespace-pre leading-relaxed scrollbar-thin">
-              <code>{code}</code>
-            </pre>
-          </div>
-        );
+
+    return parts.map((part, partIndex) => {
+      const key = `${messageIndex}-${partIndex}`;
+      if (!(part.startsWith('```') && part.endsWith('```'))) {
+        return <p className="message-text" key={key}>{part}</p>;
       }
-      
+
+      const match = part.match(/```(\w*)\n([\s\S]*?)```/);
+      const language = match?.[1] || 'code';
+      const code = match?.[2] || part.slice(3, -3);
       return (
-        <div key={globalIdx} className="whitespace-pre-wrap text-sm leading-relaxed text-gray-200">
-          {part}
+        <div className="code-block" key={key}>
+          <div className="code-header">
+            <span><FileCode2 size={14} aria-hidden="true" /> {language}</span>
+            <button
+              aria-label={`Copy ${language} code`}
+              className="code-copy"
+              onClick={() => handleCopyCode(code, key)}
+              type="button"
+            >
+              {copiedIndex === key ? <Check size={14} /> : <Copy size={14} />}
+              {copiedIndex === key ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <pre><code>{code}</code></pre>
         </div>
       );
     });
   };
 
-  const parseRetrievedContext = () => {
-    const logs = [...sessionState.systemLogs].reverse();
-    const contextLog = logs.find(log => log.type === 'retrieved_context');
-    if (!contextLog || !contextLog.data || contextLog.data.length === 0) return [];
+  const retrievedContextCards = useMemo(() => {
+    const contextLog = [...sessionState.systemLogs]
+      .reverse()
+      .find((log) => log.type === 'retrieved_context');
+    if (!contextLog?.data) return [];
+    const rawContext = Array.isArray(contextLog.data) ? contextLog.data[0] : contextLog.data;
+    if (typeof rawContext !== 'string') return [];
 
-    const contextStr = contextLog.data[0];
     const cards = [];
-
-    const graphifyMatch = contextStr.match(/<graphify_context>([\s\S]*?)<\/graphify_context>/);
-    if (graphifyMatch) {
+    const dependencyMatch = rawContext.match(/<graphify_context>([\s\S]*?)<\/graphify_context>/);
+    if (dependencyMatch) {
       cards.push({
-        id: 'graphify',
-        type: 'Graphify Dependency Link',
-        content: graphifyMatch[1].trim(),
-        style: 'border-purple-900/50 bg-purple-950/10 text-purple-200 glow-border-purple card-3d-purple'
+        id: 'dependency',
+        type: 'Dependency context',
+        content: dependencyMatch[1].trim(),
+        tone: 'secondary',
       });
     }
-
-    const memoryMatches = contextStr.matchAll(/<retrieved_memory>([\s\S]*?)<\/retrieved_memory>/g);
-    let index = 1;
-    for (const match of memoryMatches) {
+    const memoryMatches = rawContext.matchAll(
+      /<retrieved_memory>([\s\S]*?)<\/retrieved_memory>/g,
+    );
+    for (const [index, match] of [...memoryMatches].entries()) {
       cards.push({
         id: `memory-${index}`,
-        type: `Vector Cluster Memory #${index}`,
+        type: `Retrieved memory ${index + 1}`,
         content: match[1].trim(),
-        style: 'border-emerald-900/50 bg-emerald-950/10 text-emerald-200 glow-border-emerald card-3d'
+        tone: 'primary',
       });
-      index++;
     }
-
     return cards;
-  };
+  }, [sessionState.systemLogs]);
 
-  const retrievedContextCards = parseRetrievedContext();
-
-  const getLatestReformulation = () => {
-    const logs = [...sessionState.systemLogs].reverse();
-    const reformLog = logs.find(log => log.type === 'query_reformulation');
-    return reformLog ? reformLog.data : null;
-  };
-
-  const latestReformulation = getLatestReformulation();
+  const latestReformulation = useMemo(
+    () => [...sessionState.systemLogs]
+      .reverse()
+      .find((log) => log.type === 'query_reformulation')?.data,
+    [sessionState.systemLogs],
+  );
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-gray-950 p-6 overflow-hidden perspective-1000">
-      
-      {/* 3 Vertical Sections side-by-side Layout (Sidebar + Chat Terminal + Context & Logs stacked) */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
-        
-        {/* Section 1: Sessions manager Sidebar (col-span-2) */}
-        <div className="lg:col-span-2 flex flex-col gap-4 border border-gray-800 bg-gray-900/20 backdrop-blur-md rounded-xl p-4 shadow-xl overflow-hidden h-full card-3d preserve-3d">
-          <div className="flex justify-between items-center border-b border-gray-800 pb-2 shrink-0">
-            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5 font-mono">
-              <FolderKanban size={14} className="text-emerald-400" />
-              Sessions
-            </h2>
-            <button 
-              onClick={handleCreateSession}
-              title="Create New Session"
-              className="p-1 bg-emerald-950/40 hover:bg-emerald-800/80 border border-emerald-900/50 rounded text-emerald-400 hover:text-white transition-all cursor-pointer hover:scale-105 active:scale-95"
-            >
-              <Plus size={14} />
-            </button>
+    <div className="workspace-page">
+      <aside className="workspace-panel session-panel" aria-labelledby="sessions-heading">
+        <div className="workspace-panel-header">
+          <div>
+            <span className="eyebrow">Isolated contexts</span>
+            <h2 id="sessions-heading"><FolderKanban size={17} /> Sessions</h2>
           </div>
-          
-          <div className="flex-1 overflow-y-auto flex flex-col gap-2 min-h-0 pr-1 scrollbar-thin">
-            {sessionState.sessions.length === 0 ? (
-              <span className="text-xs text-gray-600 italic p-2 text-center">No active sessions</span>
-            ) : (
-              sessionState.sessions.map((sid) => {
-                const isActive = sid === sessionState.activeSessionId;
-                return (
-                  <div
-                    key={sid}
-                    onClick={() => setSessionState(prev => ({ ...prev, activeSessionId: sid }))}
-                    className={`group flex justify-between items-center px-3 py-2.5 rounded-lg border text-xs font-mono transition-all duration-300 cursor-pointer ${
-                      isActive 
-                        ? 'border-purple-800/80 bg-purple-950/20 text-purple-200 glow-border-purple shadow-md' 
-                        : 'border-gray-800/60 bg-gray-950/20 text-gray-400 hover:text-gray-200 hover:border-gray-700/50 hover:bg-gray-900/30'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      <MessageSquare size={12} className={isActive ? 'text-purple-400' : 'text-gray-500'} />
-                      <span className="truncate" title={sid}>{sid}</span>
-                    </div>
-                    
-                    <button
-                      onClick={(e) => handleDeleteSession(sid, e)}
-                      title="Burn Session"
-                      className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-950/40 border border-transparent hover:border-red-900/50 rounded text-red-500 hover:text-red-400 transition-all cursor-pointer shrink-0"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
+          <button
+            aria-label="Create session"
+            className="icon-button icon-button-primary"
+            onClick={openCreateDialog}
+            title="Create session"
+            type="button"
+          >
+            <Plus size={17} />
+          </button>
         </div>
-
-        {/* Section 2: Interactive Chat Terminal (col-span-6) */}
-        <div className="lg:col-span-6 flex flex-col gap-4 border border-gray-800 bg-gray-900/20 backdrop-blur-md rounded-xl p-4 shadow-xl overflow-hidden h-full card-3d preserve-3d">
-          <div className="flex justify-between items-center border-b border-gray-800 pb-2 shrink-0">
-            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 font-mono">
-              <Terminal size={14} className="text-emerald-400" />
-              Interactive Chat Terminal
-            </h2>
-            {isProcessing && (
-              <span className="flex h-2.5 w-2.5 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-              </span>
-            )}
-          </div>
-          
-          <div className="flex-1 overflow-y-auto flex flex-col gap-4 min-h-0 pr-1 scrollbar-thin">
-            {sessionState.chatHistory.length === 0 && !activeStream && (
-               <div className="flex-1 flex flex-col items-center justify-center text-center p-6 select-none animate-float">
-                  <div className="p-4 bg-emerald-950/20 border border-emerald-900/30 rounded-full mb-3 text-emerald-500 shadow-inner">
-                    <Terminal size={32} />
-                  </div>
-                  <h3 className="text-sm font-bold text-gray-300">Awaiting Ingestion...</h3>
-                  <p className="text-xs text-gray-500 mt-1 max-w-[240px]">Initialize the session registry and input architectural constraints.</p>
-               </div>
-            )}
-            
-            {sessionState.chatHistory.map((msg, idx) => (
-              <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-start' : 'items-end'} transition-all duration-300 animate-slide`}>
-                <div className={`max-w-[90%] rounded-xl p-4 border shadow-md transition-all ${
-                  msg.role === 'user' 
-                    ? 'bg-blue-950/20 border-blue-900/50 text-blue-100 focus-within:border-blue-700 hover:border-blue-800/80 shadow-blue-950/10' 
-                    : 'bg-gray-900/60 border-gray-800/80 text-gray-200 hover:border-gray-700/80 shadow-black/20'
-                }`}>
-                  <span className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 block ${msg.role === 'user' ? 'text-blue-400' : 'text-emerald-400'}`}>
-                    {msg.role === 'user' ? 'react_dashboard_01' : 'Assistant'}
-                  </span>
-                  <div>{renderMessageContent(msg.content, idx)}</div>
-                </div>
-              </div>
-            ))}
-
-            {activeStream && (
-              <div className="flex flex-col items-end animate-slide">
-                <div className="max-w-[90%] rounded-xl p-4 bg-gray-900/60 border border-emerald-900/30 text-gray-200 shadow-lg glow-border-emerald">
-                  <span className="text-[10px] font-bold uppercase tracking-widest mb-1.5 block text-emerald-400 animate-pulse">
-                    Assistant (Streaming...)
-                  </span>
-                  <div>{renderMessageContent(activeStream, 'active')}</div>
-                </div>
-              </div>
-            )}
-            <div ref={streamEndRef} />
-          </div>
-
-          {/* Input Form */}
-          <form onSubmit={handleSubmit} className="flex gap-3 mt-auto shrink-0 border-t border-gray-800/80 pt-4">
-            <input 
-              type="text" 
-              value={inputQuery}
-              onChange={(e) => setInputQuery(e.target.value)}
-              placeholder="Enter prompt or architectural requirement..."
-              className="flex-1 bg-gray-950/80 border border-gray-800 focus:border-emerald-500/50 text-gray-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-1 focus:ring-emerald-500/20 transition-all text-sm font-sans shadow-inner placeholder:text-gray-600"
-              disabled={isProcessing}
+        <div className="session-list">
+          {sessionState.sessions.length === 0 ? (
+            <EmptyState
+              description="A session will appear when the runtime connects."
+              icon={Database}
+              title="No sessions"
             />
-            <button 
-              type="submit" 
-              disabled={isProcessing || !inputQuery}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-lg transition-all text-sm shadow-lg btn-3d disabled:bg-gray-800 disabled:text-gray-500 disabled:shadow-none disabled:transform-none shrink-0 flex items-center gap-1.5 cursor-pointer"
-            >
-              <Play size={14} fill="currentColor" /> Execute
-            </button>
-          </form>
-        </div>
-
-        {/* Section 3: System Context & Logs stacked vertically (col-span-4) */}
-        <div className="lg:col-span-4 flex flex-col gap-6 h-full min-h-0">
-          
-          {/* Top Panel: Grounding Context (50% height) */}
-          <div className="flex-1 flex flex-col gap-3 border border-gray-800 bg-gray-900/20 backdrop-blur-md rounded-xl p-4 shadow-xl overflow-hidden card-3d card-3d-purple preserve-3d min-h-0">
-            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest border-b border-gray-800 pb-2 shrink-0 flex items-center gap-2 font-mono">
-              <Layers size={14} className="text-purple-400" />
-              Grounding & Context
-            </h2>
-            
-            <div className="flex-1 overflow-y-auto flex flex-col gap-3 min-h-0 pr-1 scrollbar-thin">
-              {latestReformulation ? (
-                <div className="flex flex-col gap-3">
-                  <div className="p-3 bg-gray-950/60 border border-gray-800 rounded-lg shadow-inner">
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-400 block mb-1">Vector DB Search Query</span>
-                    <p className="text-xs text-gray-300 leading-relaxed font-mono">{latestReformulation.search_vector_query}</p>
-                  </div>
-                  
-                  <div className="p-3 bg-gray-950/60 border border-gray-800 rounded-lg shadow-inner">
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-blue-400 block mb-1">Grounded LLM Prompt</span>
-                    <p className="text-xs text-gray-300 leading-relaxed">{latestReformulation.grounded_llm_prompt}</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="p-3 bg-gray-950/20 border border-gray-800/40 rounded-lg text-center select-none py-4">
-                  <AlertCircle size={14} className="text-gray-600 mx-auto mb-1.5" />
-                  <span className="text-xs text-gray-600 italic">No query reformulation context...</span>
-                </div>
-              )}
-
-              <div className="border-t border-gray-800/60 my-1 pt-2 shrink-0">
-                <span className="text-[9px] font-bold uppercase tracking-widest text-purple-400 block mb-2">Memory Anchors</span>
+          ) : sessionState.sessions.map((sessionId) => {
+            const isActive = sessionId === sessionState.activeSessionId;
+            return (
+              <div className={`session-row ${isActive ? 'is-active' : ''}`} key={sessionId}>
+                <button
+                  aria-current={isActive ? 'true' : undefined}
+                  className="session-select"
+                  onClick={() => setSessionState((previous) => ({
+                    ...previous,
+                    activeSessionId: sessionId,
+                  }))}
+                  title={sessionId}
+                  type="button"
+                >
+                  <MessageSquare size={15} aria-hidden="true" />
+                  <span>{sessionId}</span>
+                </button>
+                <button
+                  aria-label={`Burn session ${sessionId}`}
+                  className="session-delete"
+                  onClick={() => {
+                    setDialogError('');
+                    setSessionDialog({ mode: 'delete', sessionId });
+                  }}
+                  title="Burn session"
+                  type="button"
+                >
+                  <Trash2 size={15} />
+                </button>
               </div>
+            );
+          })}
+        </div>
+        <div className="session-panel-footer">
+          <span className="status-dot" aria-hidden="true" />
+          {sessionState.sessions.length} active {sessionState.sessions.length === 1 ? 'session' : 'sessions'}
+        </div>
+      </aside>
 
-              {retrievedContextCards.length === 0 ? (
-                <div className="p-4 border border-dashed border-gray-800/60 rounded-lg text-gray-600 italic text-xs text-center select-none">
-                  No active vector context.
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {retrievedContextCards.map(card => (
-                    <div key={card.id} className={`border rounded-lg p-2.5 shadow-md transition-all duration-300 text-xs ${card.style}`}>
-                      <span className="font-bold uppercase tracking-widest text-[8px] text-gray-400 border-b border-gray-800/60 pb-1 block mb-1.5">{card.type}</span>
-                      <pre className="whitespace-pre-wrap font-sans leading-relaxed text-gray-300 text-[10px]">{card.content}</pre>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div ref={contextEndRef} />
-            </div>
+      <section className="workspace-panel conversation-panel" aria-labelledby="conversation-heading">
+        <div className="workspace-panel-header conversation-header">
+          <div>
+            <span className="eyebrow">Bounded reasoning</span>
+            <h2 id="conversation-heading"><MessageSquare size={17} /> Conversation</h2>
           </div>
-
-          {/* Bottom Panel: System Event Logs (50% height) */}
-          <div className="flex-1 flex flex-col gap-3 border border-gray-800 bg-gray-900/20 backdrop-blur-md rounded-xl p-4 shadow-xl overflow-hidden card-3d card-3d-blue preserve-3d min-h-0">
-            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest border-b border-gray-800 pb-2 shrink-0 flex items-center gap-2 font-mono">
-              <Cpu size={14} className="text-blue-400" />
-              System Event Logs
-            </h2>
-            
-            <div className="flex-1 overflow-y-auto flex flex-col gap-3 min-h-0 pr-1 scrollbar-thin">
-              {sessionState.systemLogs.length === 0 ? (
-                <span className="text-gray-600 text-xs italic p-2 select-none text-center block">System logs empty...</span>
-              ) : (
-                sessionState.systemLogs.map((log, idx) => {
-                  let badgeColor = 'text-blue-400 border-blue-900/40 bg-blue-950/10';
-                  if (log.type === 'error') badgeColor = 'text-red-400 border-red-950 bg-red-950/10';
-                  if (log.type === 'action') badgeColor = 'text-amber-400 border-amber-900/40 bg-amber-950/10';
-                  if (log.type === 'query_reformulation') badgeColor = 'text-purple-400 border-purple-900/40 bg-purple-950/10';
-                  if (log.type === 'retrieved_context') badgeColor = 'text-emerald-400 border-emerald-900/40 bg-emerald-950/10';
-
-                  return (
-                    <div key={idx} className="p-3 rounded-lg text-xs bg-gray-950 border border-gray-900 shadow-md hover:border-gray-800 transition-all animate-slide">
-                      <span className={`inline-block border px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest mb-2 ${badgeColor}`}>
-                        {log.type}
-                      </span>
-                      
-                      {log.type === 'query_reformulation' && (
-                        <div className="text-gray-400 font-sans space-y-1 mt-1 leading-relaxed text-[11px]">
-                          <div><strong className="text-gray-500 font-semibold text-[9px] uppercase block">Search Vector:</strong> {log.data.search_vector_query}</div>
-                          <div><strong className="text-gray-500 font-semibold text-[9px] uppercase block">Grounded Prompt:</strong> {log.data.grounded_llm_prompt}</div>
-                        </div>
-                      )}
-                      
-                      {log.type === 'retrieved_context' && (
-                        <div className="text-gray-400 mt-1 text-[11px]">
-                          Context size loaded: <strong className="text-emerald-400 font-mono">{(log.data[0] || '').length.toLocaleString()}</strong> chars.
-                        </div>
-                      )}
-                      
-                      {log.type === 'action' && (
-                        <div className="text-gray-400 font-sans space-y-1 mt-1 leading-relaxed text-[11px]">
-                          <div><strong className="text-gray-500 font-semibold text-[9px] uppercase block">Action:</strong> {log.data.type}</div>
-                          {log.data.payload && (
-                            <div className="bg-gray-900 p-2 rounded border border-gray-800 font-mono text-[9px] text-amber-300/80 overflow-x-auto">
-                              {JSON.stringify(log.data.payload)}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {log.type === 'error' && (
-                        <div className="text-red-400 font-mono leading-relaxed mt-1 text-[11px]">{log.data}</div>
-                      )}
-
-                      {log.type !== 'query_reformulation' && log.type !== 'retrieved_context' && log.type !== 'action' && log.type !== 'error' && (
-                        <pre className="text-gray-400 font-mono overflow-x-auto text-[9px] leading-relaxed mt-1">
-                          {JSON.stringify(log.data, null, 2)}
-                        </pre>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-              <div ref={logsEndRef} />
-            </div>
-          </div>
-
+          <span className={`status-chip status-${isProcessing ? 'working' : 'ready'}`}>
+            {isProcessing && <LoaderCircle className="spinner-icon" size={14} />}
+            {isProcessing ? 'Generating' : 'Ready'}
+          </span>
         </div>
 
-      </div>
+        <div className="message-list" aria-live="polite">
+          {sessionState.chatHistory.length === 0 && !activeStream ? (
+            <EmptyState
+              description="Ask a question or provide a task. SC-EVM will assemble only the context needed for this session."
+              icon={MessageSquare}
+              title="Start a focused session"
+            />
+          ) : (
+            sessionState.chatHistory.map((message, index) => (
+              <article className={`message message-${message.role}`} key={`${message.role}-${index}`}>
+                <div className="message-avatar" aria-hidden="true">
+                  {message.role === 'user' ? <span>RG</span> : <Code2 size={16} />}
+                </div>
+                <div className="message-body">
+                  <div className="message-meta">
+                    <strong>{message.role === 'user' ? 'You' : 'SC-EVM'}</strong>
+                    {message.role !== 'user' && <span>AI-generated</span>}
+                  </div>
+                  <div>{renderMessageContent(message.content, index)}</div>
+                </div>
+              </article>
+            ))
+          )}
+
+          {activeStream && (
+            <article className="message message-assistant message-streaming">
+              <div className="message-avatar" aria-hidden="true"><Code2 size={16} /></div>
+              <div className="message-body">
+                <div className="message-meta">
+                  <strong>SC-EVM</strong>
+                  <span>Generating</span>
+                </div>
+                <div>{renderMessageContent(activeStream, 'active')}</div>
+              </div>
+            </article>
+          )}
+          <div ref={streamEndRef} />
+        </div>
+
+        <form className="composer" onSubmit={handleSubmit}>
+          <label className="sr-only" htmlFor="workspace-prompt">Message SC-EVM</label>
+          <textarea
+            className="composer-input"
+            disabled={isProcessing || !sessionState.activeSessionId}
+            id="workspace-prompt"
+            maxLength={12000}
+            onChange={(event) => setInputQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            placeholder={sessionState.activeSessionId
+              ? 'Describe the task, constraint, or decision…'
+              : 'Waiting for an active session…'}
+            ref={promptRef}
+            rows={3}
+            value={inputQuery}
+          />
+          <div className="composer-footer">
+            <span>Enter to send · Shift + Enter for a new line</span>
+            {isProcessing ? (
+              <button className="button button-secondary button-compact" onClick={stopGeneration} type="button">
+                <Square size={14} fill="currentColor" /> Stop
+              </button>
+            ) : (
+              <button
+                className="button button-primary button-compact"
+                disabled={!inputQuery.trim() || !sessionState.activeSessionId}
+                type="submit"
+              >
+                <Send size={15} aria-hidden="true" /> Send
+              </button>
+            )}
+          </div>
+        </form>
+      </section>
+
+      <aside className="workspace-panel inspector-panel" aria-label="Context inspector">
+        <div className="inspector-tabs" role="tablist" aria-label="Inspector views">
+          <button
+            aria-controls="context-panel"
+            aria-selected={inspectorTab === 'context'}
+            className={inspectorTab === 'context' ? 'is-active' : ''}
+            onClick={() => setInspectorTab('context')}
+            role="tab"
+            type="button"
+          >
+            <Layers3 size={15} /> Context
+          </button>
+          <button
+            aria-controls="events-panel"
+            aria-selected={inspectorTab === 'events'}
+            className={inspectorTab === 'events' ? 'is-active' : ''}
+            onClick={() => setInspectorTab('events')}
+            role="tab"
+            type="button"
+          >
+            <ServerCog size={15} /> Events
+            {sessionState.systemLogs.length > 0 && (
+              <span className="tab-count">{sessionState.systemLogs.length}</span>
+            )}
+          </button>
+        </div>
+
+        {inspectorTab === 'context' ? (
+          <div className="inspector-content" id="context-panel" role="tabpanel">
+            <div className="inspector-intro">
+              <PanelRight size={17} aria-hidden="true" />
+              <div>
+                <strong>Context used for this turn</strong>
+                <p>Inspect what was selected before the model responded.</p>
+              </div>
+            </div>
+
+            {latestReformulation && (
+              <section className="inspector-section">
+                <span className="eyebrow">Request framing</span>
+                <div className="context-card">
+                  <span>Retrieval query</span>
+                  <p className="mono">{latestReformulation.search_vector_query}</p>
+                </div>
+                <div className="context-card">
+                  <span>Grounded request</span>
+                  <p>{latestReformulation.grounded_llm_prompt}</p>
+                </div>
+              </section>
+            )}
+
+            <section className="inspector-section">
+              <div className="section-label-row">
+                <span className="eyebrow">Retrieved evidence</span>
+                <span>{retrievedContextCards.length}</span>
+              </div>
+              {retrievedContextCards.length === 0 ? (
+                <EmptyState
+                  description="Evidence selected for a request appears here."
+                  icon={Clipboard}
+                  title="No context selected"
+                />
+              ) : retrievedContextCards.map((card) => (
+                <article className={`evidence-card evidence-${card.tone}`} key={card.id}>
+                  <span>{card.type}</span>
+                  <p>{card.content}</p>
+                </article>
+              ))}
+            </section>
+          </div>
+        ) : (
+          <div className="inspector-content" id="events-panel" role="tabpanel">
+            <div className="inspector-intro">
+              <ServerCog size={17} aria-hidden="true" />
+              <div>
+                <strong>Runtime event stream</strong>
+                <p>Operational events from the current request.</p>
+              </div>
+            </div>
+            {sessionState.systemLogs.length === 0 ? (
+              <EmptyState
+                description="Events appear as the runtime processes a request."
+                icon={ServerCog}
+                title="No events yet"
+              />
+            ) : (
+              <ol className="event-list">
+                {sessionState.systemLogs.map((log, index) => (
+                  <li className={`event-row event-${log.type}`} key={`${log.type}-${index}`}>
+                    <span className="event-marker" aria-hidden="true" />
+                    <div>
+                      <span className="event-label">{formatEventLabel(log.type)}</span>
+                      {log.type === 'error' ? (
+                        <p className="event-error"><AlertCircle size={14} /> {String(log.data)}</p>
+                      ) : (
+                        <pre>{typeof log.data === 'string'
+                          ? log.data
+                          : JSON.stringify(log.data, null, 2)}</pre>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
+      </aside>
+
+      <SessionDialog
+        busy={dialogBusy}
+        error={dialogError}
+        mode={sessionDialog?.mode}
+        onClose={() => !dialogBusy && setSessionDialog(null)}
+        onConfirm={handleDialogConfirm}
+        open={Boolean(sessionDialog)}
+        sessionId={sessionDialog?.sessionId}
+      />
     </div>
   );
 }

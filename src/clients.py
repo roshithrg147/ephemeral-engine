@@ -13,7 +13,12 @@ from src.config import settings
 logger = logging.getLogger("SC-EVM.Clients")
 
 NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-NVIDIA_TIMEOUT = httpx.Timeout(connect=3.0, read=45.0, write=45.0, pool=5.0)
+NVIDIA_TIMEOUT = httpx.Timeout(
+    connect=3.0,
+    read=settings.NVIDIA_READ_TIMEOUT_SECONDS,
+    write=45.0,
+    pool=5.0,
+)
 NVIDIA_LIMITS = httpx.Limits(max_connections=64, max_keepalive_connections=64)
 DEFAULT_MAX_TOKENS = settings.NVIDIA_MAX_TOKENS
 DEFAULT_MAX_RETRIES = settings.NVIDIA_MAX_RETRIES
@@ -24,6 +29,10 @@ class NIMResponse(str):
         obj = str.__new__(cls, text)
         obj.usage = usage or {}
         return obj
+
+
+class IncompleteModelResponseError(RuntimeError):
+    """The provider completed a request without returning user-facing text."""
 
 
 PRICE_TABLE = {
@@ -152,7 +161,7 @@ class NVIDIA_NIM_Client:
         else:
             messages.append({"role": "user", "content": prompt})
 
-        return {
+        payload = {
             "model": model_name,
             "messages": messages,
             "temperature": temp,
@@ -160,6 +169,14 @@ class NVIDIA_NIM_Client:
             "max_tokens": max_tokens,
             "stream": stream,
         }
+        model_lower = model_name.lower()
+        if "qwen3.5" in model_lower or "qwen3-5" in model_lower:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
+            payload["temperature"] = 0.7
+            payload["top_p"] = 0.8
+        elif "kimi" in model_lower or "moonshot" in model_lower:
+            payload["thinking"] = {"type": "disabled"}
+        return payload
 
     def _request_parts(
         self,
@@ -220,10 +237,9 @@ class NVIDIA_NIM_Client:
         if isinstance(content, str) and content.strip():
             return content
 
-        reasoning_content = message.get("reasoning_content")
-        flattened_reasoning = _flatten_reasoning(reasoning_content)
-        if flattened_reasoning:
-            return flattened_reasoning
+        flattened_content = _flatten_reasoning(content)
+        if flattened_content:
+            return flattened_content
 
         text = message.get("text")
         if isinstance(text, str) and text.strip():
@@ -238,7 +254,16 @@ class NVIDIA_NIM_Client:
         if isinstance(delta_content, str) and delta_content.strip():
             return delta_content
 
-        raise KeyError(f"content fields missing: {list(message.keys())}")
+        choice_text = first_choice.get("text")
+        if isinstance(choice_text, str) and choice_text.strip():
+            return choice_text
+
+        finish_reason = first_choice.get("finish_reason")
+        reasoning_present = bool(_flatten_reasoning(message.get("reasoning_content")))
+        raise IncompleteModelResponseError(
+            "provider returned no user-facing assistant content "
+            f"(finish_reason={finish_reason!r}, reasoning_present={reasoning_present})"
+        )
 
     def call_llm(
         self,
@@ -324,11 +349,14 @@ class NVIDIA_NIM_Client:
                     try:
                         text = self._extract_response_text(result)
                         return NIMResponse(text, usage)
-                    except Exception:
-                        logger.error(
+                    except IncompleteModelResponseError:
+                        first_choice = (result.get("choices") or [{}])[0] or {}
+                        logger.warning(
                             "NVIDIA response missing assistant text",
-                            extra={"payload_keys": list(result.keys())},
-                            exc_info=True,
+                            extra={
+                                "finish_reason": first_choice.get("finish_reason"),
+                                "message_keys": list((first_choice.get("message") or {}).keys()),
+                            },
                         )
                         raise
 
@@ -353,12 +381,20 @@ class NVIDIA_NIM_Client:
                 raise RuntimeError(
                     f"NVIDIA API Error: Status {response.status_code}, Detail: {response.text}"
                 )
-            except (httpx.HTTPError, httpx.TimeoutException):
+            except httpx.HTTPError as exc:
+                retry_limit = max_retries
+                if isinstance(exc, httpx.ReadTimeout):
+                    retry_limit = min(max_retries, settings.NVIDIA_READ_TIMEOUT_RETRIES)
                 if attempt < max_retries:
+                    if attempt >= retry_limit:
+                        raise
                     logger.warning(
                         "NVIDIA request failed; retrying",
-                        extra={"attempt": attempt + 1, "max_retries": max_retries},
-                        exc_info=True,
+                        extra={
+                            "attempt": attempt + 1,
+                            "retry_limit": retry_limit,
+                            "error_type": type(exc).__name__,
+                        },
                     )
                     await asyncio.sleep(backoff)
                     backoff *= 2

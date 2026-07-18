@@ -71,6 +71,12 @@ Please see [Feedback and Triage](docs/FEEDBACK_AND_TRIAGE.md) for how to submit 
 
 ## 🏗️ Architecture Overview
 
+For a code-derived takeover and clean-room replication reference, see the
+[System Architecture and Workflow Specification](docs/SYSTEM_ARCHITECTURE_AND_WORKFLOW_SPECIFICATION.md).
+
+See the [20-Turn, 20-Session Lifecycle](docs/20-TURN-20-SESSION-LIFECYCLE.md) for a
+plain-language explanation of how twenty isolated sessions move through twenty turns each.
+
 ```
                   ┌──────────────────────────┐
                   │       User Prompt        │
