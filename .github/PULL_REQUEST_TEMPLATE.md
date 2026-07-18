@@ -7,7 +7,7 @@ Describe what changed and why.
 ## Linked work
 
 - Closes #
-- RFC: Not required / link accepted RFC
+- RFC: Not required with justification / link to accepted RFC
 - Product pillar: Relevance / Isolation / Control / Evidence
 
 ## Impact
@@ -29,7 +29,7 @@ Describe credible failure modes and how to reverse the change safely.
 ## Checklist
 
 - [ ] The linked issue met the Definition of Ready.
-- [ ] Significant decisions reference an accepted RFC.
+- [ ] Significant decisions reference an accepted RFC, or the PR explains why an RFC is not required.
 - [ ] Tests, lint, and relevant builds pass locally.
 - [ ] No credentials, sensitive data, generated reports, or machine-specific paths were committed.
 - [ ] Security and privacy impacts were reviewed.

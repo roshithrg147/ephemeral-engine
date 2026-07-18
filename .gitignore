@@ -176,6 +176,9 @@ images/generated_*.png
 images/output*.png
 assistant_generated.png
 
+# Local agent/session handoff state
+docs/NEXT_SESSION_HANDOFF.md
+
 # uv package manager config
 .uv/
 
