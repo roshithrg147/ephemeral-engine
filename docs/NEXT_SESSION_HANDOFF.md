@@ -32,28 +32,19 @@ governance.
 ## Verified Git State
 
 - Current branch: `agent/github-project-workflow`
-- Current commit: `5bd13be`
-- `main` and `origin/main` were also at `5bd13be` when this snapshot was made.
-- The working tree contains intentional, uncommitted GitHub governance changes.
+- Governance commit: `3f205ac` (`docs: establish GitHub project workflow`)
+- `main` and `origin/main` remain at `5bd13be`.
+- The governance branch is pushed to `origin/agent/github-project-workflow`.
+- Pull request [#10](https://github.com/roshithrg147/ephemeral-engine/pull/10)
+  is open against `main`, mergeable, and has a successful Sourcery review check.
 - `git diff --check` passes.
-- Do not discard, overwrite, or reset these changes.
+- The working tree was clean before this handoff refresh.
 
-Tracked modifications:
-
-- `.github/ISSUE_TEMPLATE/bug_report.yml`
-- `.github/PULL_REQUEST_TEMPLATE.md`
-- `README.md`
-
-Untracked files:
-
-- `.github/ISSUE_TEMPLATE/architecture_change.yml`
-- `.github/ISSUE_TEMPLATE/config.yml`
-- `.github/ISSUE_TEMPLATE/engineering_task.yml`
-- `.github/ISSUE_TEMPLATE/feature_request.yml`
-- `docs/GITHUB_PROJECTS_OPERATING_GUIDE.md`
-- `docs/NEXT_SESSION_HANDOFF.md`
-
-The governance changes have not been committed or pushed from this branch.
+The governance delivery is tracked by
+[issue #9](https://github.com/roshithrg147/ephemeral-engine/issues/9). Both the
+issue and pull request are in `Review` in Project 3 with Priority P1, Type
+Documentation, Product Pillar Control, Developer Preview release gate, RFC not
+required, and effort M.
 
 ## Verified GitHub Authentication
 
@@ -74,7 +65,8 @@ deliberately skipped so repository security settings remained unchanged.
 Project number: `3`  
 Visibility: private  
 Linked repository: `roshithrg147/ephemeral-engine`  
-Items: seven open issues, all in `Backlog`
+Items: nine total; seven seeded issues in `Backlog`, plus issue #9 and pull
+request #10 in `Review`
 
 The Project description and readme require alignment with the Manifesto,
 Product Boundary, accepted RFCs, and Architecture.
@@ -156,13 +148,22 @@ or anywhere under `/home/rg/.codex`, so it was not run.
 
 ### Phase 0: Stabilize governance delivery
 
-1. Review the local issue templates, pull-request template, README links, and
-   operating guide.
-2. Validate YAML, Markdown links/fences, and whitespace.
-3. Commit the intentional governance files on
+Completed:
+
+1. Reviewed the issue templates, pull-request template, README links, operating
+   guide, and handoff against the governance source order.
+2. Validated YAML parsing, issue-form schema structure, local Markdown links,
+   referenced labels, and whitespace.
+3. Committed and pushed the governance files on
    `agent/github-project-workflow`.
-4. Push the branch and open a focused pull request.
-5. Complete Project views and workflows when the GitHub web editor works.
+4. Created issue #9 and pull request #10, added both to Project 3, and moved
+   both to `Review`.
+
+Remaining:
+
+1. Review and merge pull request #10.
+2. Confirm issue #9 and both Project items move to `Done`.
+3. Complete Project views and workflows when the GitHub web editor works.
 
 Why first: the Project should have a durable operating guide and issue intake
 contract before development accelerates.
@@ -209,7 +210,9 @@ The next chat should:
 4. Verify GitHub CLI authentication with `gh auth status`.
 5. Refresh Project 3 metadata, fields, items, views, and workflows.
 6. Preserve all existing local changes.
-7. Start with Phase 0 unless the user explicitly selects another issue.
+7. Finish the remaining Phase 0 review/merge and Project configuration work.
+8. Start issue #6 only after the governance pull request is complete, unless
+   the user explicitly selects another issue.
 
 ## Copy-Paste Prompt for the New Chat
 
@@ -225,10 +228,11 @@ Verify the live Git state and GitHub Project 3 state before making changes.
 Preserve every existing working-tree change; do not reset, discard, or
 overwrite them. The current branch should be agent/github-project-workflow.
 
-Begin with Phase 0 from the handoff: review and validate the local GitHub
-governance files, fix only concrete issues, run proportional checks, and report
-whether the branch is safe to commit and push. Do not implement P0 architecture
-work before its RFC is accepted.
+Finish Phase 0 from the handoff: inspect issue #9 and pull request #10, address
+only concrete review findings, merge when all gates pass, and confirm the
+Project items move to Done. Complete the Project views and workflows only
+through supported GitHub controls. Then begin issue #6 unless the user selects
+another item. Do not implement P0 architecture work before its RFC is accepted.
 
 GitHub Project:
 https://github.com/users/roshithrg147/projects/3
