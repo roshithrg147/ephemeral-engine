@@ -9,8 +9,9 @@ from src.benchmarks.runner import (
     load_default_prompts,
     select_strategies,
 )
+from src.config import settings
 
-DEFAULT_BASE_URL = "http://127.0.0.1:8001"
+DEFAULT_BASE_URL = settings.SC_EVM_SINGLE_MODEL_BASE_URL
 DEFAULT_REPORT_DIR = Path("benchmarks/single_model")
 
 

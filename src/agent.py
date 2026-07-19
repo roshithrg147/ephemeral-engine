@@ -66,9 +66,9 @@ class AgentOrchestrator:
     ):
         self.model_connector = model_connector or ModelConnector()
         self.prompt_manager = prompt_manager or PromptManager()
-        self.gemini_model = "qwen"
-        self.claude_model = "kimi"
-        self.refiner_model = self.claude_model
+        self.model_1_key = settings.MODEL_1_KEY
+        self.model_2_key = settings.MODEL_2_KEY
+        self.synthesis_model_key = self.model_2_key
 
         self.authenticate()
 
@@ -97,7 +97,7 @@ class AgentOrchestrator:
             model_key=model_key,
             prompt=messages,
             system_prompt=system_prompt,
-            max_tokens=2048,
+            max_tokens=settings.MODEL_CANDIDATE_MAX_TOKENS,
         )
 
     def generate_response(
@@ -112,20 +112,20 @@ class AgentOrchestrator:
         system_instructions = self.prompt_manager.build_orchestrator_system_prompt(lt_context)
 
         # Call models in parallel threads
-        claude_resp = None
-        gemini_resp = None
+        model_1_response = None
+        model_2_response = None
 
         futures = {
-            "claude": _MODEL_EXECUTOR.submit(
+            "model_2": _MODEL_EXECUTOR.submit(
                 self._query_model_raw,
-                self.claude_model,
+                self.model_2_key,
                 system_instructions,
                 user_prompt,
                 st_history,
             ),
-            "gemini": _MODEL_EXECUTOR.submit(
+            "model_1": _MODEL_EXECUTOR.submit(
                 self._query_model_raw,
-                self.gemini_model,
+                self.model_1_key,
                 system_instructions,
                 user_prompt,
                 st_history,
@@ -135,19 +135,24 @@ class AgentOrchestrator:
         for name, future in futures.items():
             try:
                 result = future.result()
-                if name == "claude":
-                    claude_resp = result
+                if name == "model_2":
+                    model_2_response = result
                 else:
-                    gemini_resp = result
+                    model_1_response = result
             except Exception as e:
                 log_error(f"agent.generate_response.{name}", str(e))
-                if name == "claude":
-                    claude_resp = f"[Kimi failed: {e}]"
+                if name == "model_2":
+                    model_2_response = f"[Model 2 failed: {e}]"
                 else:
-                    gemini_resp = f"[Qwen failed: {e}]"
+                    model_1_response = f"[Model 1 failed: {e}]"
 
         # Synthesize both responses
-        refined = self.synthesize_responses(user_prompt, claude_resp, gemini_resp, lt_context)
+        refined = self.synthesize_responses(
+            user_prompt,
+            model_2_response,
+            model_1_response,
+            lt_context,
+        )
 
         # Send refined response to the clipboard daemon
         self.send_to_clipboard_daemon(refined.text)
@@ -178,24 +183,23 @@ class AgentOrchestrator:
     def synthesize_responses(
         self,
         user_prompt: str,
-        claude_resp: Any,
-        gemini_resp: Any,
+        model_2_response: Any,
+        model_1_response: Any,
         lt_context: str,
     ) -> RefinedResponse:
-        """Uses NVIDIA NIM Qwen model to weigh both responses and return a RefinedResponse."""
+        """Use the configured NVIDIA NIM synthesis role to refine both responses."""
         synthesis_prompt = self.prompt_manager.build_synthesis_prompt(
             long_term_context=lt_context,
             user_prompt=user_prompt,
-            kimi_response=claude_resp,
-            qwen_response=gemini_resp,
+            model_2_response=model_2_response,
+            model_1_response=model_1_response,
         )
         try:
-            # We query NVIDIA NIM model
             response_text = self.model_connector.call(
-                model_key=self.refiner_model,
+                model_key=self.synthesis_model_key,
                 prompt=synthesis_prompt,
                 system_prompt=self.prompt_manager.json_response_system_prompt(),
-                max_tokens=1536,
+                max_tokens=settings.MODEL_SYNTHESIS_MAX_TOKENS,
             )
             text_clean = strip_code_fences(response_text)
             data = json.loads(text_clean)
@@ -206,25 +210,25 @@ class AgentOrchestrator:
 
             records = []
 
-            # 1. Claude/Kimi call
-            claude_usage = getattr(claude_resp, "usage", None)
-            if claude_usage:
+            # 1. Model 2 candidate call
+            model_2_usage = getattr(model_2_response, "usage", None)
+            if model_2_usage:
                 records.append(
                     {
                         "measurement_type": "exact",
                         "provider": "nvidia",
-                        "model": self.claude_model,
+                        "model": self.model_2_key,
                         "tokenizer": None,
-                        "input_tokens": claude_usage.get("prompt_tokens"),
-                        "output_tokens": claude_usage.get("completion_tokens"),
+                        "input_tokens": model_2_usage.get("prompt_tokens"),
+                        "output_tokens": model_2_usage.get("completion_tokens"),
                         "cached_tokens": None,
                         "retry_usage": None,
                         "missing_reason": None,
                         "price_table_version": "v1.0",
-                        "calculated_cost": (claude_usage.get("prompt_tokens", 0) / 1000.0)
-                        * get_model_price(self.claude_model)["input_1k"]
-                        + (claude_usage.get("completion_tokens", 0) / 1000.0)
-                        * get_model_price(self.claude_model)["output_1k"],
+                        "calculated_cost": (model_2_usage.get("prompt_tokens", 0) / 1000.0)
+                        * get_model_price(self.model_2_key)["input_1k"]
+                        + (model_2_usage.get("completion_tokens", 0) / 1000.0)
+                        * get_model_price(self.model_2_key)["output_1k"],
                     }
                 )
             else:
@@ -232,10 +236,13 @@ class AgentOrchestrator:
                     {
                         "measurement_type": "estimate",
                         "provider": "nvidia",
-                        "model": self.claude_model,
+                        "model": self.model_2_key,
                         "tokenizer": None,
                         "input_tokens": len(user_prompt) // 4,
-                        "output_tokens": len(getattr(claude_resp, "text", str(claude_resp))) // 4,
+                        "output_tokens": len(
+                            getattr(model_2_response, "text", str(model_2_response))
+                        )
+                        // 4,
                         "cached_tokens": None,
                         "retry_usage": None,
                         "missing_reason": "exact usage not returned by provider",
@@ -244,25 +251,25 @@ class AgentOrchestrator:
                     }
                 )
 
-            # 2. Gemini/Qwen call
-            gemini_usage = getattr(gemini_resp, "usage", None)
-            if gemini_usage:
+            # 2. Model 1 candidate call
+            model_1_usage = getattr(model_1_response, "usage", None)
+            if model_1_usage:
                 records.append(
                     {
                         "measurement_type": "exact",
                         "provider": "nvidia",
-                        "model": self.gemini_model,
+                        "model": self.model_1_key,
                         "tokenizer": None,
-                        "input_tokens": gemini_usage.get("prompt_tokens"),
-                        "output_tokens": gemini_usage.get("completion_tokens"),
+                        "input_tokens": model_1_usage.get("prompt_tokens"),
+                        "output_tokens": model_1_usage.get("completion_tokens"),
                         "cached_tokens": None,
                         "retry_usage": None,
                         "missing_reason": None,
                         "price_table_version": "v1.0",
-                        "calculated_cost": (gemini_usage.get("prompt_tokens", 0) / 1000.0)
-                        * get_model_price(self.gemini_model)["input_1k"]
-                        + (gemini_usage.get("completion_tokens", 0) / 1000.0)
-                        * get_model_price(self.gemini_model)["output_1k"],
+                        "calculated_cost": (model_1_usage.get("prompt_tokens", 0) / 1000.0)
+                        * get_model_price(self.model_1_key)["input_1k"]
+                        + (model_1_usage.get("completion_tokens", 0) / 1000.0)
+                        * get_model_price(self.model_1_key)["output_1k"],
                     }
                 )
             else:
@@ -270,10 +277,13 @@ class AgentOrchestrator:
                     {
                         "measurement_type": "estimate",
                         "provider": "nvidia",
-                        "model": self.gemini_model,
+                        "model": self.model_1_key,
                         "tokenizer": None,
                         "input_tokens": len(user_prompt) // 4,
-                        "output_tokens": len(getattr(gemini_resp, "text", str(gemini_resp))) // 4,
+                        "output_tokens": len(
+                            getattr(model_1_response, "text", str(model_1_response))
+                        )
+                        // 4,
                         "cached_tokens": None,
                         "retry_usage": None,
                         "missing_reason": "exact usage not returned by provider",
@@ -289,7 +299,7 @@ class AgentOrchestrator:
                     {
                         "measurement_type": "exact",
                         "provider": "nvidia",
-                        "model": self.refiner_model,
+                        "model": self.synthesis_model_key,
                         "tokenizer": None,
                         "input_tokens": synth_usage.get("prompt_tokens"),
                         "output_tokens": synth_usage.get("completion_tokens"),
@@ -298,9 +308,9 @@ class AgentOrchestrator:
                         "missing_reason": None,
                         "price_table_version": "v1.0",
                         "calculated_cost": (synth_usage.get("prompt_tokens", 0) / 1000.0)
-                        * get_model_price(self.refiner_model)["input_1k"]
+                        * get_model_price(self.synthesis_model_key)["input_1k"]
                         + (synth_usage.get("completion_tokens", 0) / 1000.0)
-                        * get_model_price(self.refiner_model)["output_1k"],
+                        * get_model_price(self.synthesis_model_key)["output_1k"],
                     }
                 )
             else:
@@ -308,7 +318,7 @@ class AgentOrchestrator:
                     {
                         "measurement_type": "estimate",
                         "provider": "nvidia",
-                        "model": self.refiner_model,
+                        "model": self.synthesis_model_key,
                         "tokenizer": None,
                         "input_tokens": len(synthesis_prompt) // 4,
                         "output_tokens": len(text_clean) // 4,
@@ -326,9 +336,13 @@ class AgentOrchestrator:
             log_error("agent.synthesize", str(e))
             # Graceful recovery if synthesis schema fails
             fallback_text = (
-                gemini_resp
-                if gemini_resp and "[Qwen failed" not in str(gemini_resp)
-                else (claude_resp if claude_resp else "Both models failed to generate response.")
+                model_1_response
+                if model_1_response and "[Model 1 failed" not in str(model_1_response)
+                else (
+                    model_2_response
+                    if model_2_response
+                    else "Both models failed to generate response."
+                )
             )
             return RefinedResponse(
                 text=str(fallback_text), intent="chat", action=Action(type="none"), remember=[]

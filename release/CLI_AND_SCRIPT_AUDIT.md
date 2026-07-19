@@ -16,10 +16,10 @@ This audit evaluates all CLI utilities, entrypoints, and standalone scripts in t
 | `scripts/generate_validation_data.py` | Internal Development Tool | **Keep** | Programmatically creates schema-compliant validation scenarios. |
 | `scripts/validate_datasets.py` | Evaluation Tool | **Keep** | Verifies schemas, checks split leakage, and generates cryptographic checksums. |
 | `src/benchmarks/runner.py` | Superseded | **Archive/Keep** | Legacy benchmark execution logic. Retained in codebase for reference comparison but not called in active campaign pipelines. |
-| `src/tests/run_stress_benchmark.py` | Evaluation Tool | **Keep** | Runs local concurrency stress benchmarks for memory boundary checks. |
 | `src/tests/run_all_tests.py` | Evaluation Tool | **Keep** | Test runner for executing all local unit and integration tests. |
 
 ## 2. Deleted / Superseded CLI Decisions
 
 - **`src/vscode_bridge.py`:** Classification: **Dead**. Removed during Day 6. VSCode context retrieval is handled natively by `src/vscode_context_provider.py`.
 - **`test_main_endpoints.py`, `test_memory_isolation.py`, `test_sc_evm.py`:** Classification: **Dead**. Replaced by pytest suites inside `src/tests/` and removed to prevent root namespace pollution.
+- **`src/tests/run_stress_benchmark.py`:** Classification: **Dead provider-specific path**. Removed during the NVIDIA-only inference consolidation because it imported undeclared Google GenAI code and obsolete module-level `src.sc_evm` functions. Current stress coverage remains in `test_concurrency_stress.py`, `test_stress_50.py`, and the governed benchmark/evidence runners.

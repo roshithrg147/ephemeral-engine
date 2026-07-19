@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from src.config import settings
+
 from .runner import EvidenceRunner, RunConfig
 
 
@@ -16,7 +18,7 @@ def main() -> None:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--smoke", action="store_true")
     mode.add_argument("--live", action="store_true")
-    parser.add_argument("--base-url", default="http://127.0.0.1:8000")
+    parser.add_argument("--base-url", default=settings.SC_EVM_BASE_URL)
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--max-retries", type=int, default=3)
     args = parser.parse_args()

@@ -14,9 +14,10 @@ from typing import Any
 import httpx
 
 from src.benchmarks.token_utils import estimate_tokens
+from src.config import settings
 from src.strategies.base import StrategyAdapter
 
-DEFAULT_BASE_URL = "http://127.0.0.1:8000"
+DEFAULT_BASE_URL = settings.SC_EVM_BASE_URL
 DEFAULT_REPORT_DIR = Path("benchmarks")
 DEFAULT_SUITE_PATH = Path(__file__).resolve().with_name("benchmark_suite.json")
 logger = logging.getLogger("SC-EVM.BenchmarkRunner")

@@ -30,15 +30,15 @@ class SCEVMEngine:
         current_input: str,
         history: list[dict[str, str]],
     ) -> tuple[str, str, dict[str, Any] | None]:
-        """Runs the query reformulation LLM call using NVIDIA NIM Qwen model."""
+        """Run query reformulation through the configured NVIDIA NIM Model 1 role."""
         # Reformulation logic uses prompt from prompt_manager
         compiled_prompt = self.reformulate_query(current_input, history)
         try:
             response_text = await self.model_connector.call_async(
-                model_key="kimi",
+                model_key=settings.MODEL_1_KEY,
                 prompt=compiled_prompt,
                 system_prompt=self.prompt_manager.REWRITE_SYSTEM_PROMPT,
-                max_tokens=512,
+                max_tokens=settings.MODEL_REFORMULATION_MAX_TOKENS,
             )
             text_clean = strip_code_fences(response_text)
             usage = getattr(response_text, "usage", None)
@@ -85,7 +85,7 @@ class SCEVMEngine:
         query_vector: list[float],
         anchor_a: list[float],
         anchor_b: list[float],
-        maximum_admitted_anchor_distance: float = 0.48,
+        maximum_admitted_anchor_distance: float = (settings.RETRIEVAL_ABSOLUTE_DISTANCE_CEILING),
     ) -> tuple[float, bool]:
         """Compute the mathematical cosine distance against dual tracking anchor targets to establish structural confidence gating.
 
@@ -106,11 +106,11 @@ class SCEVMEngine:
         distances: list[float],
         embeddings: list[list[float]],
         *,
-        base_threshold: float = 0.52,  # Represents maximum_admitted_distance
-        absolute_ceiling: float = 0.48,  # Represents maximum_admitted_distance ceiling
-        absolute_floor: float = 0.38,  # Represents maximum_admitted_distance floor
-        neighboring_delta_limit: float = 0.12,
-        top_anchor_delta_limit: float = 0.18,
+        base_threshold: float = settings.RETRIEVAL_BASE_DISTANCE_THRESHOLD,
+        absolute_ceiling: float = settings.RETRIEVAL_ABSOLUTE_DISTANCE_CEILING,
+        absolute_floor: float = settings.RETRIEVAL_ABSOLUTE_DISTANCE_FLOOR,
+        neighboring_delta_limit: float = settings.RETRIEVAL_NEIGHBOR_DELTA_LIMIT,
+        top_anchor_delta_limit: float = settings.RETRIEVAL_TOP_ANCHOR_DELTA_LIMIT,
     ) -> list[str]:
         """Filters retrieved documents through the dual-anchor gating rules.
 
@@ -192,7 +192,7 @@ class SCEVMEngine:
             try:
                 results = collection.query(
                     query_embeddings=[query_vector],
-                    n_results=3,
+                    n_results=settings.RETRIEVAL_RESULT_LIMIT,
                     where={"session_id": session_id},
                     include=["documents", "distances", "embeddings"],
                 )

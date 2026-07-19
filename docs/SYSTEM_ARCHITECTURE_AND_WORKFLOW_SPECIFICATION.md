@@ -269,8 +269,17 @@ The repository currently has these values in an ignored `engine-dashboard/.env.d
 | `NVIDIA_API_KEY` | empty | Yes for normal operation | Shared provider credential; preferred by both configured models |
 | `NVIDIA_API_KEY_QWEN` | empty | Conditional | Model-specific fallback credential |
 | `NVIDIA_API_KEY_KIWI` | empty | Conditional | Core-model-specific fallback credential |
-| `MODEL_1_FLASH` | `qwen/qwen3.5-122b-a10b` | No | First primary model |
-| `MODEL_2_CORE` | `moonshotai/kimi-k2.6` | No | Rewrite, second primary, and synthesis model |
+| `SC_EVM_BASE_URL` | `http://127.0.0.1:8000` | No | Canonical local API origin used by CLI, lifecycle, evidence, and benchmark clients |
+| `SC_EVM_SINGLE_MODEL_BASE_URL` | `http://127.0.0.1:8001` | No | Single-model benchmark API origin |
+| `NVIDIA_NIM_CHAT_COMPLETIONS_URL` | NVIDIA hosted chat-completions URL | No | Sole external inference endpoint |
+| `MODEL_1_KEY` | `qwen` | No | Logical Model 1 role used for reformulation and the first candidate |
+| `MODEL_2_KEY` | `kiwi` | No | Logical Model 2 role used for the second candidate and synthesis |
+| `MODEL_1_FLASH` | `qwen/qwen3.5-122b-a10b` | No | NVIDIA NIM physical model for Model 1 |
+| `MODEL_2_CORE` | `moonshotai/kimi-k2.6` | No | NVIDIA NIM physical model for Model 2 |
+| `MODEL_1_ALIASES` / `MODEL_2_ALIASES` | role-specific tuples | No | Exact accepted aliases; `claude` and `opus` are compatibility aliases for the configured NVIDIA Model 2 route, not direct Anthropic clients |
+| `MODEL_CANDIDATE_MAX_TOKENS` | `2048` | No | Candidate response ceiling |
+| `MODEL_REFORMULATION_MAX_TOKENS` | `512` | No | Reformulation and evidence-reasoner response ceiling |
+| `MODEL_SYNTHESIS_MAX_TOKENS` | `1536` | No | Structured synthesis response ceiling |
 | `CORS_ORIGINS` | localhost and 127.0.0.1 on port 3000 | No | JSON-encoded browser origin list |
 | `MAX_WORKER_THREADS` | `8` | No | API orchestration pool size; validated `2..64` |
 | `COMMAND_TIMEOUT_SECONDS` | `300` | No | Terminal-client shell action timeout |
@@ -280,6 +289,7 @@ The repository currently has these values in an ignored `engine-dashboard/.env.d
 | `GC_INTERVAL_SECONDS` | `300` | No | Session collector interval |
 | `MAX_ACTIVE_SESSIONS` | `1024` | No | Process-local session capacity |
 | `MAX_HISTORY_TURNS` | `6` | No | Maximum **message objects**, despite the name |
+| `SESSION_TOKEN_BUDGET` | `2500` | No | Exposed compatibility/scaffolding value; still not an enforced tokenizer budget |
 | `AUDIT_LOG_PATH` | `~/.config/anthropic-agent/audit.log` | No | Local JSONL audit/error path |
 | `CHROMA_EMBEDDING_MODEL` | `ONNXMiniLM_L6_V2` | No | Descriptive setting; current memory construction directly instantiates that implementation |
 | `DEVELOPMENT_PHASE` | `0` | No | Default action-policy phase |
@@ -289,15 +299,21 @@ The repository currently has these values in an ignored `engine-dashboard/.env.d
 | `DIAGNOSTIC_MODE` | `false` | No | Globally emits retrieved context over SSE |
 | `NVIDIA_MAX_TOKENS` | `4096` | No | Default provider response ceiling |
 | `NVIDIA_MAX_RETRIES` | `3` | No | Retry count after the initial request |
-| `NVIDIA_READ_TIMEOUT_SECONDS` | `60` | No | Provider read timeout |
+| `NVIDIA_CONNECT_TIMEOUT_SECONDS` / `NVIDIA_READ_TIMEOUT_SECONDS` / `NVIDIA_WRITE_TIMEOUT_SECONDS` / `NVIDIA_POOL_TIMEOUT_SECONDS` | `3` / `60` / `45` / `5` | No | Unified NVIDIA transport timeouts |
 | `NVIDIA_READ_TIMEOUT_RETRIES` | `1` | No | Stricter retry ceiling for read timeouts |
+| `NVIDIA_MAX_CONNECTIONS` / `NVIDIA_MAX_KEEPALIVE_CONNECTIONS` | `64` / `64` | No | Unified NVIDIA connection-pool bounds |
+| `RETRIEVAL_RESULT_LIMIT` | `3` | No | Maximum semantic candidates read before admission gating |
+| `RETRIEVAL_BASE_DISTANCE_THRESHOLD` | `0.52` | No | Dynamic-calibration fallback and default admission threshold |
+| `RETRIEVAL_ABSOLUTE_DISTANCE_CEILING` / `RETRIEVAL_ABSOLUTE_DISTANCE_FLOOR` | `0.48` / `0.38` | No | Absolute rejection and unconditional-admission boundaries |
+| `RETRIEVAL_NEIGHBOR_DELTA_LIMIT` / `RETRIEVAL_TOP_ANCHOR_DELTA_LIMIT` | `0.12` / `0.18` | No | Relative dual-anchor distance limits |
+| `RETRIEVAL_CALIBRATION_WEIGHT` | `0.3` | No | Position between positive and negative calibration distances |
+| `RETRIEVAL_MIN_DISTANCE_THRESHOLD` / `RETRIEVAL_MAX_DISTANCE_THRESHOLD` | `0.1` / `0.9` | No | Calibration clamp |
 
 #### Client, utility, and evaluation variables
 
 | Variable | Consumer | Default/purpose |
 | --- | --- | --- |
 | `REACT_APP_API_URL` | Browser build | API origin; defaults to `http://127.0.0.1:8000` |
-| `SC_EVM_BASE_URL` | CLI, tests | API origin; defaults to `http://127.0.0.1:8000` |
 | `SC_EVM_SESSION_ID` | CLI | `cli-tui-session-001` |
 | `SC_EVM_PREVIEW_DIR` | lifecycle/diff tools | overrides managed temporary preview directory |
 | `MYCLIPBOARD_CONFIG_PATH` | clipboard GUI/sync | overrides local clipboard configuration file |
@@ -805,7 +821,11 @@ This subsystem has a different persistence and trust model from API sessions. It
 
 The evidence platform in `src/evidence/` is the governed path for immutable artifacts, provenance, statistical analysis, and certification. The lightweight runner does not provide equivalent evidentiary guarantees.
 
-`src/tests/run_stress_benchmark.py` is a stale legacy script: it imports module-level functions that no longer exist in `src.sc_evm` and imports an undeclared Google client package. It is not a valid replication acceptance command. Preserve it only as historical material or refactor it before use; the supported stress coverage is in the current pytest tests and benchmark/evidence runners.
+The former `src/tests/run_stress_benchmark.py` legacy script was removed during
+the NVIDIA-only inference consolidation because it imported obsolete
+module-level `src.sc_evm` functions and an undeclared Google client package.
+Supported stress coverage is in the current pytest tests and the
+benchmark/evidence runners.
 
 ## 9. Integration Points
 

@@ -9,34 +9,63 @@ from src.clients import IncompleteModelResponseError, NVIDIA_NIM_Client
 from src.config import settings
 
 
-def test_qwen_payload_disables_reasoning_mode() -> None:
-    payload = NVIDIA_NIM_Client()._prepare_payload(
-        "qwen/qwen3.5-122b-a10b",
-        0.6,
-        0.95,
+def test_model_1_payload_uses_configured_nvidia_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "NVIDIA_API_KEY", "test-key")
+    _, payload = NVIDIA_NIM_Client()._request_parts(
+        settings.MODEL_1_KEY,
         "hello",
         None,
         False,
         128,
     )
 
+    assert payload["model"] == settings.MODEL_1_FLASH
     assert payload["chat_template_kwargs"] == {"enable_thinking": False}
-    assert payload["temperature"] == 0.7
-    assert payload["top_p"] == 0.8
+    assert payload["temperature"] == settings.MODEL_1_TEMPERATURE
+    assert payload["top_p"] == settings.MODEL_1_TOP_P
 
 
-def test_kimi_payload_disables_reasoning_mode() -> None:
-    payload = NVIDIA_NIM_Client()._prepare_payload(
-        "moonshotai/kimi-k2.6",
-        1.0,
-        1.0,
+def test_model_2_payload_uses_configured_nvidia_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "NVIDIA_API_KEY", "test-key")
+    _, payload = NVIDIA_NIM_Client()._request_parts(
+        settings.MODEL_2_KEY,
         "hello",
         None,
         False,
         128,
     )
 
-    assert payload["thinking"] == {"type": "disabled"}
+    assert payload["model"] == settings.MODEL_2_CORE
+    assert payload["temperature"] == settings.MODEL_2_TEMPERATURE
+    assert payload["top_p"] == settings.MODEL_2_TOP_P
+    if settings.MODEL_2_CORE == settings.MODEL_1_FLASH:
+        assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+    else:
+        assert payload["thinking"] == {"type": "disabled"}
+
+
+@pytest.mark.parametrize("model_key", ["kiwi", "kimi", "claude", "opus", "model_2"])
+def test_model_2_aliases_resolve_to_configured_nvidia_route(
+    monkeypatch: pytest.MonkeyPatch,
+    model_key: str,
+) -> None:
+    monkeypatch.setattr(settings, "NVIDIA_API_KEY", "test-key")
+
+    model_name, temperature, top_p, api_key = NVIDIA_NIM_Client()._map_model(model_key)
+
+    assert model_name == settings.MODEL_2_CORE
+    assert temperature == settings.MODEL_2_TEMPERATURE
+    assert top_p == settings.MODEL_2_TOP_P
+    assert api_key == "test-key"
+
+
+def test_unknown_model_alias_is_rejected() -> None:
+    with pytest.raises(ValueError, match="Unknown NVIDIA NIM model key"):
+        NVIDIA_NIM_Client()._map_model("unregistered-provider-model")
 
 
 @pytest.mark.parametrize(
