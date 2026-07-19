@@ -5,6 +5,8 @@ import time
 
 import httpx
 
+from src.config import settings
+
 # Adversarial 50-question suite
 TEST_QUESTIONS = [
     "How do I initialize the database schema for a 30k user e-commerce store?",
@@ -44,7 +46,7 @@ async def run_test(client: httpx.AsyncClient, session_id: str, prompt: str):
 async def main():
     session_id = "stress_test_session_01"
     results = []
-    base_url = os.getenv("SC_EVM_BASE_URL", "http://127.0.0.1:8000")
+    base_url = settings.SC_EVM_BASE_URL
 
     print(f"Starting 50-turn stress test for session {session_id}...")
 

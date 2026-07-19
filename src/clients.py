@@ -3,6 +3,7 @@ import concurrent.futures
 import json
 import logging
 import threading
+import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -12,22 +13,33 @@ from src.config import settings
 
 logger = logging.getLogger("SC-EVM.Clients")
 
-NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NVIDIA_TIMEOUT = httpx.Timeout(
-    connect=3.0,
+    connect=settings.NVIDIA_CONNECT_TIMEOUT_SECONDS,
     read=settings.NVIDIA_READ_TIMEOUT_SECONDS,
-    write=45.0,
-    pool=5.0,
+    write=settings.NVIDIA_WRITE_TIMEOUT_SECONDS,
+    pool=settings.NVIDIA_POOL_TIMEOUT_SECONDS,
 )
-NVIDIA_LIMITS = httpx.Limits(max_connections=64, max_keepalive_connections=64)
+NVIDIA_LIMITS = httpx.Limits(
+    max_connections=settings.NVIDIA_MAX_CONNECTIONS,
+    max_keepalive_connections=settings.NVIDIA_MAX_KEEPALIVE_CONNECTIONS,
+)
 DEFAULT_MAX_TOKENS = settings.NVIDIA_MAX_TOKENS
 DEFAULT_MAX_RETRIES = settings.NVIDIA_MAX_RETRIES
 
 
 class NIMResponse(str):
-    def __new__(cls, text: str, usage: dict[str, Any] | None = None):
+    usage: dict[str, Any]
+    provider_metadata: dict[str, Any]
+
+    def __new__(
+        cls,
+        text: str,
+        usage: dict[str, Any] | None = None,
+        provider_metadata: dict[str, Any] | None = None,
+    ):
         obj = str.__new__(cls, text)
         obj.usage = usage or {}
+        obj.provider_metadata = provider_metadata or {}
         return obj
 
 
@@ -35,17 +47,22 @@ class IncompleteModelResponseError(RuntimeError):
     """The provider completed a request without returning user-facing text."""
 
 
-PRICE_TABLE = {
-    "qwen/qwen3.5-122b-a10b": {"input_1k": 0.0003, "output_1k": 0.0004},
-    "moonshotai/kimi-k2.6": {"input_1k": 0.0005, "output_1k": 0.0006},
-}
-
-
 def get_model_price(model_name: str) -> dict[str, float]:
-    for key, val in PRICE_TABLE.items():
-        if key in model_name or model_name in key:
-            return val
-    return {"input_1k": 0.0003, "output_1k": 0.0004}
+    """Return configured pricing for a physical model ID or logical role alias."""
+    normalized = model_name.strip().lower()
+    model_2_names = {
+        settings.MODEL_2_CORE.lower(),
+        *(alias.lower() for alias in settings.MODEL_2_ALIASES),
+    }
+    if normalized in model_2_names:
+        return {
+            "input_1k": settings.MODEL_2_INPUT_PRICE_PER_1K,
+            "output_1k": settings.MODEL_2_OUTPUT_PRICE_PER_1K,
+        }
+    return {
+        "input_1k": settings.MODEL_1_INPUT_PRICE_PER_1K,
+        "output_1k": settings.MODEL_1_OUTPUT_PRICE_PER_1K,
+    }
 
 
 class NVIDIA_NIM_Client:
@@ -113,24 +130,35 @@ class NVIDIA_NIM_Client:
             cls._background_loop = None
             cls._background_thread = None
 
-    def _map_model(self, model_key: str):
-        """Maps a model key to the official NVIDIA NIM model name, parameters, and API key."""
-        key_lower = model_key.lower()
-        if "qwen" in key_lower:
+    def _map_model(self, model_key: str) -> tuple[str, float, float, str]:
+        """Map a configured logical role or physical ID to one NVIDIA NIM route."""
+        normalized_key = model_key.strip().lower()
+        model_1_keys = {
+            settings.MODEL_1_KEY.lower(),
+            settings.MODEL_1_FLASH.lower(),
+            *(alias.lower() for alias in settings.MODEL_1_ALIASES),
+        }
+        model_2_keys = {
+            settings.MODEL_2_KEY.lower(),
+            settings.MODEL_2_CORE.lower(),
+            *(alias.lower() for alias in settings.MODEL_2_ALIASES),
+        }
+
+        if normalized_key in model_1_keys:
             model_name = settings.MODEL_1_FLASH
-            temp = 0.60
-            top_p = 0.95
+            temp = settings.MODEL_1_TEMPERATURE
+            top_p = settings.MODEL_1_TOP_P
             api_key = settings.NVIDIA_API_KEY or settings.NVIDIA_API_KEY_QWEN
-        elif "kimi" in key_lower or "kiwi" in key_lower or "moonshot" in key_lower:
+        elif normalized_key in model_2_keys:
             model_name = settings.MODEL_2_CORE
-            temp = 1.00
-            top_p = 1.00
+            temp = settings.MODEL_2_TEMPERATURE
+            top_p = settings.MODEL_2_TOP_P
             api_key = settings.NVIDIA_API_KEY or settings.NVIDIA_API_KEY_KIWI
         else:
-            model_name = settings.MODEL_1_FLASH
-            temp = 0.60
-            top_p = 0.95
-            api_key = settings.NVIDIA_API_KEY
+            supported = sorted(model_1_keys | model_2_keys)
+            raise ValueError(
+                f"Unknown NVIDIA NIM model key {model_key!r}; configured keys: {supported}"
+            )
 
         if not api_key:
             raise ValueError(f"NVIDIA API Key not found in environment for key: {model_key}")
@@ -146,6 +174,7 @@ class NVIDIA_NIM_Client:
         system_prompt: str | None,
         stream: bool,
         max_tokens: int,
+        seed: int | None = None,
     ) -> dict[str, Any]:
         """Prepares the request payload for the NVIDIA completions endpoint."""
         messages = []
@@ -169,12 +198,12 @@ class NVIDIA_NIM_Client:
             "max_tokens": max_tokens,
             "stream": stream,
         }
-        model_lower = model_name.lower()
-        if "qwen3.5" in model_lower or "qwen3-5" in model_lower:
+        if seed is not None:
+            payload["seed"] = seed
+        model_lower = model_name.strip().lower()
+        if model_lower == settings.MODEL_1_FLASH.lower():
             payload["chat_template_kwargs"] = {"enable_thinking": False}
-            payload["temperature"] = 0.7
-            payload["top_p"] = 0.8
-        elif "kimi" in model_lower or "moonshot" in model_lower:
+        elif model_lower == settings.MODEL_2_CORE.lower():
             payload["thinking"] = {"type": "disabled"}
         return payload
 
@@ -185,6 +214,7 @@ class NVIDIA_NIM_Client:
         system_prompt: str | None,
         stream: bool,
         max_tokens: int | None,
+        seed: int | None = None,
     ) -> tuple[dict[str, str], dict[str, Any]]:
         model_name, temp, top_p, api_key = self._map_model(model_key)
         headers = {
@@ -199,6 +229,7 @@ class NVIDIA_NIM_Client:
             system_prompt,
             stream,
             max_tokens or DEFAULT_MAX_TOKENS,
+            seed,
         )
         return headers, payload
 
@@ -272,6 +303,9 @@ class NVIDIA_NIM_Client:
         system_prompt: str | None = None,
         stream: bool = False,
         max_tokens: int | None = None,
+        request_timeout_seconds: float | None = None,
+        max_retries: int | None = None,
+        seed: int | None = None,
     ) -> str | Iterator[str]:
         """Synchronously calls the pooled async NVIDIA client for legacy callers."""
         if stream:
@@ -280,10 +314,20 @@ class NVIDIA_NIM_Client:
             )
 
         headers, payload = self._request_parts(
-            model_key, prompt, system_prompt, stream=False, max_tokens=max_tokens
+            model_key,
+            prompt,
+            system_prompt,
+            stream=False,
+            max_tokens=max_tokens,
+            seed=seed,
         )
         return self._submit_to_pool(
-            self._call_with_retries(headers=headers, payload=payload)
+            self._call_with_retries(
+                headers=headers,
+                payload=payload,
+                request_timeout_seconds=request_timeout_seconds,
+                max_retries=max_retries,
+            )
         ).result()
 
     async def call_llm_async(
@@ -293,15 +337,30 @@ class NVIDIA_NIM_Client:
         system_prompt: str | None = None,
         stream: bool = False,
         max_tokens: int | None = None,
+        request_timeout_seconds: float | None = None,
+        max_retries: int | None = None,
+        seed: int | None = None,
     ) -> str | AsyncIterator[str]:
         """Asynchronously calls the NVIDIA completions endpoint through the shared pool."""
         headers, payload = self._request_parts(
-            model_key, prompt, system_prompt, stream, max_tokens=max_tokens
+            model_key,
+            prompt,
+            system_prompt,
+            stream,
+            max_tokens=max_tokens,
+            seed=seed,
         )
         if stream:
             return self._stream_from_pool(headers=headers, payload=payload)
         return await asyncio.wrap_future(
-            self._submit_to_pool(self._call_with_retries(headers=headers, payload=payload))
+            self._submit_to_pool(
+                self._call_with_retries(
+                    headers=headers,
+                    payload=payload,
+                    request_timeout_seconds=request_timeout_seconds,
+                    max_retries=max_retries,
+                )
+            )
         )
 
     async def _stream_from_pool(
@@ -334,21 +393,53 @@ class NVIDIA_NIM_Client:
             yield item
 
     async def _call_with_retries(
-        self, *, headers: dict[str, str], payload: dict[str, Any]
+        self,
+        *,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        request_timeout_seconds: float | None = None,
+        max_retries: int | None = None,
     ) -> NIMResponse:
-        max_retries = DEFAULT_MAX_RETRIES
+        retry_count = DEFAULT_MAX_RETRIES if max_retries is None else max_retries
         backoff = 1.0
         client = await self._get_async_client()
+        started = time.perf_counter()
+        attempts: list[dict[str, Any]] = []
 
-        for attempt in range(max_retries + 1):
+        for attempt in range(retry_count + 1):
+            attempt_started = time.perf_counter()
             try:
-                response = await client.post(NVIDIA_URL, headers=headers, json=payload)
+                request_options: dict[str, Any] = {
+                    "headers": headers,
+                    "json": payload,
+                }
+                if request_timeout_seconds is not None:
+                    request_options["timeout"] = request_timeout_seconds
+                response = await client.post(
+                    settings.NVIDIA_NIM_CHAT_COMPLETIONS_URL,
+                    **request_options,
+                )
+                attempts.append(
+                    {
+                        "attempt": attempt + 1,
+                        "status": response.status_code,
+                        "seconds": time.perf_counter() - attempt_started,
+                    }
+                )
                 if response.status_code == 200:
                     result = response.json()
                     usage = result.get("usage")
                     try:
                         text = self._extract_response_text(result)
-                        return NIMResponse(text, usage)
+                        return NIMResponse(
+                            text,
+                            usage,
+                            {
+                                "attempts": attempts,
+                                "latency_seconds": time.perf_counter() - started,
+                                "provider_request_id": response.headers.get("x-request-id"),
+                            },
+                        )
                     except IncompleteModelResponseError:
                         first_choice = (result.get("choices") or [{}])[0] or {}
                         logger.warning(
@@ -360,7 +451,7 @@ class NVIDIA_NIM_Client:
                         )
                         raise
 
-                if response.status_code in {429, 500, 502, 503, 504} and attempt < max_retries:
+                if response.status_code in {429, 500, 502, 503, 504} and attempt < retry_count:
                     retry_after = response.headers.get("Retry-After")
                     if retry_after and retry_after.isdigit():
                         sleep_time = int(retry_after)
@@ -371,7 +462,7 @@ class NVIDIA_NIM_Client:
                         extra={
                             "status_code": response.status_code,
                             "attempt": attempt + 1,
-                            "max_retries": max_retries,
+                            "max_retries": retry_count,
                         },
                     )
                     await asyncio.sleep(sleep_time)
@@ -382,10 +473,17 @@ class NVIDIA_NIM_Client:
                     f"NVIDIA API Error: Status {response.status_code}, Detail: {response.text}"
                 )
             except httpx.HTTPError as exc:
-                retry_limit = max_retries
+                attempts.append(
+                    {
+                        "attempt": attempt + 1,
+                        "error": type(exc).__name__,
+                        "seconds": time.perf_counter() - attempt_started,
+                    }
+                )
+                retry_limit = retry_count
                 if isinstance(exc, httpx.ReadTimeout):
-                    retry_limit = min(max_retries, settings.NVIDIA_READ_TIMEOUT_RETRIES)
-                if attempt < max_retries:
+                    retry_limit = min(retry_count, settings.NVIDIA_READ_TIMEOUT_RETRIES)
+                if attempt < retry_count:
                     if attempt >= retry_limit:
                         raise
                     logger.warning(
@@ -417,7 +515,10 @@ class NVIDIA_NIM_Client:
         for attempt in range(max_retries + 1):
             try:
                 async with client.stream(
-                    "POST", NVIDIA_URL, headers=headers, json=payload
+                    "POST",
+                    settings.NVIDIA_NIM_CHAT_COMPLETIONS_URL,
+                    headers=headers,
+                    json=payload,
                 ) as response:
                     if response.status_code in {429, 500, 502, 503, 504} and attempt < max_retries:
                         retry_after = response.headers.get("Retry-After")

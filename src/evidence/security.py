@@ -9,6 +9,8 @@ from typing import Any
 
 import httpx
 
+from src.config import settings
+
 
 class SecurityBenchmarkExecutor:
     def __init__(self, base_url: str, *, timeout: float = 400.0):
@@ -182,7 +184,7 @@ def _result(name: str, status: str, evidence: str, failure: str | None = None) -
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run live SC-EVM security benchmark scenarios.")
-    parser.add_argument("--base-url", default="http://127.0.0.1:8000")
+    parser.add_argument("--base-url", default=settings.SC_EVM_BASE_URL)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     started = time.perf_counter()

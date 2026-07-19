@@ -1,5 +1,6 @@
 import unittest
 
+from src.config import settings
 from src.sc_evm import SCEVMEngine
 
 
@@ -31,8 +32,8 @@ class TestSCEVMEngine(unittest.TestCase):
 
         embs = [
             [1.0, 0.0, 0.0],  # doc1 (Anchor A initially)
-            [0.9, 0.1, 0.0],  # doc2 (similar, should pass <= 0.52 cosine dist)
-            [0.0, 1.0, 0.0],  # doc3 (dissimilar, should fail > 0.52 cosine dist)
+            [0.9, 0.1, 0.0],  # doc2 (similar, should pass configured distance gate)
+            [0.0, 1.0, 0.0],  # doc3 (dissimilar, should fail configured distance gate)
         ]
 
         matched = self.engine.filter_documents_via_gating(
@@ -40,7 +41,7 @@ class TestSCEVMEngine(unittest.TestCase):
             documents=docs,
             distances=dists,
             embeddings=embs,
-            base_threshold=0.52,
+            base_threshold=settings.RETRIEVAL_BASE_DISTANCE_THRESHOLD,
         )
 
         print("Matched Documents:", matched)

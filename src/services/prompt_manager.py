@@ -42,11 +42,11 @@ If the user requests code generation for UI, frontend, or feature components, yo
 --- USER PROMPT ---
 {user_prompt}
 
---- RESPONSE A (Moonshot Kimi) ---
-{claude_resp}
+--- RESPONSE A (NVIDIA NIM MODEL 2) ---
+{model_2_response}
 
---- RESPONSE B (Qwen) ---
-{gemini_resp}
+--- RESPONSE B (NVIDIA NIM MODEL 1) ---
+{model_1_response}
 """
 
     AUGMENTED_PROMPT_TEMPLATE = """--- RETRIEVED MEMORY CONTEXT ---
@@ -78,14 +78,14 @@ If the user requests code generation for UI, frontend, or feature components, yo
         *,
         long_term_context: str,
         user_prompt: str,
-        kimi_response: str,
-        qwen_response: str,
+        model_2_response: str,
+        model_1_response: str,
     ) -> str:
         return cls.SYNTHESIS_SYSTEM_PROMPT.format(
             lt_context=long_term_context,
             user_prompt=user_prompt,
-            claude_resp=kimi_response,
-            gemini_resp=qwen_response,
+            model_2_response=model_2_response,
+            model_1_response=model_1_response,
         )
 
     @classmethod

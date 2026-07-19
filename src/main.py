@@ -245,8 +245,12 @@ async def get_session_memory(
             message="Memory data retrieved successfully",
             data={
                 "pending_commit_buffer": record.metadata_registry.get("pending_commit_buffer", []),
-                "base_threshold": record.metadata_registry.get("base_threshold", 0.52),
-                "token_budget": record.metadata_registry.get("token_budget", 2500),
+                "base_threshold": record.metadata_registry.get(
+                    "base_threshold", settings.RETRIEVAL_BASE_DISTANCE_THRESHOLD
+                ),
+                "token_budget": record.metadata_registry.get(
+                    "token_budget", settings.SESSION_TOKEN_BUDGET
+                ),
                 "indexed_documents": docs,
             },
         )
@@ -286,7 +290,9 @@ async def _sse_query_generator_locked(
         "learned_facts", []
     ) + record.metadata_registry.get("pending_commit_buffer", [])
     pending_mems = list(record.metadata_registry.get("pending_commit_buffer", []))
-    base_threshold = record.metadata_registry.get("base_threshold", 0.52)
+    base_threshold = record.metadata_registry.get(
+        "base_threshold", settings.RETRIEVAL_BASE_DISTANCE_THRESHOLD
+    )
 
     try:
         docs = await get_indexed_documents(record, session_id)

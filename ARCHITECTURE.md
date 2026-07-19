@@ -57,7 +57,7 @@ Each subsystem has exactly one runtime-status classification: **Active Core**, *
 | Graphify bridge | Optional structural code context | `src/graphify_bridge.py`, `src/sc_evm.py` | Queries dependencies/usages in parallel with semantic retrieval | Reformulated query/entity text | Structural context text | None | Graphify CLI and generated graph | Missing CLI, timeout, or command error returns empty context | Experimental |
 | Persistent learned-fact manager | Optional durable profile/facts for daemon path | `src/memory.py` | Loads, deduplicates, locks, and writes local JSON | Facts/profile changes | Long-term context | `~/.assistant_memory.json` and lock | Local filesystem, file lock | Load keeps defaults; failed/locked write is logged and skipped | Active Optional |
 | Telemetry sink | Local interaction/error audit | `src/telemetry_sink.py` | Appends JSON lines | Session interactions and errors | Local audit entries | Configured audit file | Local filesystem | Logging failure is caught by callers where integrated | Active Optional |
-| React dashboard | Reference web control plane | `engine-dashboard/` | Chat, session operations, memory display, charts | Browser input, API/SSE | UI | Browser state | Backend API | UI shows request errors; some analytics are placeholders | Active Optional |
+| React dashboard | Reference web control plane | `engine-dashboard/` | Chat, session operations, memory display, charts | Browser input, API/SSE | UI | Browser state | Backend API | UI shows request errors; latency/session/intent state is measured, while token efficiency remains heuristic | Active Optional |
 | Terminal client | Reference interactive client and action approval | `src/cli.py` | Session setup, SSE rendering, history/memory, burn, action prompts | Terminal input | Terminal output and approved local actions | Client session ID | Backend API | Network errors are reported to user | Active Optional |
 | Diff/action engine | Validates, previews, and applies file edits | `src/apply_diff_engine.py` | Enforces edit contract and tracks previews | Structured edit payload | Preview or changed file | Preview registry/files | Local filesystem | Invalid contract/path fails explicitly | Active Optional |
 | Secure lifecycle manager | Coordinates burn and preview cleanup | `src/secure_lifecycle_manager.py` | Calls burn and removes registered temporary previews | API URL, session ID | Cleanup result | Preview registry reset | Backend and filesystem | Local cleanup continues if backend is unavailable | Active Optional |
@@ -66,7 +66,7 @@ Each subsystem has exactly one runtime-status classification: **Active Core**, *
 | Clipboard service and GUI | Local encrypted clipboard workflow | `src/clipboard_service.py`, `src/clipboard_gui.py`, `src/daemon.py` | Captures clips, displays GUI, accepts local IPC | Clipboard events, socket requests | Clipboard entries and agent responses | Encrypted in-process history, local config | OS clipboard, GUI, UNIX socket | Platform/IPC failures are logged and isolated | Active Optional |
 | Clipboard synchronization | Intended cross-device relay seam | `src/sync.py` | Derives key and simulates push/pull | Secret and clipboard text | Status only | Salt/config and in-process cipher | Missing external relay | Reports BYOB not configured; no real synchronization | Stubbed |
 | Image generation action | Placeholder action branch | `src/agent.py` | Returns a path without generating content | Prompt, filename | Local path | None | None | Always behaves as a stub | Stubbed |
-| Benchmark runner | Repeatable strategy execution and metric artifacts | `src/benchmarks/`, `src/tests/run_benchmark_suite*.py` | Runs prompts and records success, latency, estimated usage | Workload and strategy | JSON artifacts | Generated report files | Backend/provider/CLI | Per-turn failures recorded; quality is not scored | Active Optional |
+| Benchmark and evidence runners | Repeatable strategy execution, evaluation, statistics, and immutable artifacts | `src/benchmarks/`, `src/evidence/`, `evaluation/` | Runs strategies and records raw outputs, evaluator results, failures, latency, usage, statistics, and certification | Governed workload, strategies, optional live services | JSON artifacts and reports | Generated immutable run directories | Backend/provider/CLI | Per-turn failures and missing evidence are retained; claim certification remains gated | Active Optional |
 | Tests and stress harnesses | Validate isolation, lifecycle, endpoints, context, tooling | `src/tests/` | Unit, integration, stress, and live checks | Code and optional live services | Test results/reports | Generated test reports | Runtime and optional backend | Failures are explicit; live tests require services | Active Optional |
 | Container packaging | Evaluation/development deployment | `Dockerfile.*`, `docker-compose.yml` | Builds API and dashboard containers | Source, env file | Running containers | Container-local plus mounted files | Docker, external provider | Restart policy; no production orchestration guarantees | Active Optional |
 | Governance and architecture records | Control product/architecture decisions | `MANIFESTO.md`, `PRODUCT_BOUNDARY.md`, `ARCHITECTURE.md`, `rfcs/`, `architecture/` | Define authority, decisions, gaps, and validation expectations | Reviews and evidence | Controlled documents | Git history | Repository process | No runtime effect | Documentation Only |
@@ -111,7 +111,8 @@ Image generation and clipboard synchronization are stubbed. Deleted legacy HTML 
 The live `/api/agent/query` path behaves as follows:
 
 1. The client submits `session_id` and `prompt`.
-2. The API looks up the session; an unknown session produces an error rather than implicit creation on this route.
+2. The API enters a session operation with `create=True`; an unknown valid
+   session ID is therefore initialized implicitly on this route.
 3. The API obtains the per-session lock to read recent history, pending memory, threshold, and a memory snapshot.
 4. The context engine sends bounded recent history and current input through intent realignment.
 5. Empty or invalid reformulation falls back to the original input.
@@ -125,12 +126,16 @@ The live `/api/agent/query` path behaves as follows:
 13. The current orchestrator obtains two candidate responses and requests one structured synthesis response.
 14. Parsed remembered facts are deduplicated into session metadata.
 15. Proposed actions are checked against the configured development phase; blocked actions become `none`.
-16. The API emits the completed response as word-sized SSE chunks, followed by action, estimated usage, and intent events.
+16. The API emits the complete answer in one `response_content` SSE event,
+    followed by action, typed usage records, legacy usage estimates, and intent.
 17. The API appends user and assistant messages under the session lock and trims direct history to six messages.
 18. A tracked background task embeds and adds the completed interaction to the session collection.
 19. The stream emits `done`; failures emit an error event and are logged.
 
-Provider-native streaming exists in the transport implementation but is not wired into the canonical API reasoning path. Current SSE response chunks are simulated after the provider response and synthesis are complete.
+Provider-native streaming exists in the transport implementation but is not
+wired into the canonical API reasoning path. The API stages one complete
+answer event after provider responses and synthesis are complete, so time to
+first answer content is approximately full-turn latency.
 
 ## 8. Context Lifecycle
 
@@ -192,7 +197,10 @@ Burn removes application-level access to session-owned ephemeral state. It does 
 
 At startup, the API checks only for local presence of a configured NVIDIA key; it does not perform a network health check. It starts the session TTL collector. The reasoning orchestrator remains lazy and authenticates when first constructed.
 
-At shutdown, tracked indexing tasks are awaited and the shared provider HTTP client is closed. No durable migration or session snapshot occurs. Ephemeral sessions disappear with the process. The TTL collector relies on process termination rather than explicit cancellation.
+At shutdown, the TTL collector is explicitly cancelled and awaited, tracked
+indexing tasks are awaited, and the shared provider HTTP client is closed. No
+durable migration or session snapshot occurs. Ephemeral sessions disappear
+with the process.
 
 ## 13. Failure and Degradation Behavior
 
@@ -219,16 +227,16 @@ The canonical boundary is `ModelConnector`: callers supply a logical model key, 
 |---|---|---|
 | Provider connector interface | `src/services/model_connector.py` delegates to one transport | Implemented |
 | NVIDIA NIM chat-completions transport | OpenAI-compatible endpoint in `src/clients.py` | Implemented |
-| Qwen model selection | Configurable `MODEL_1_FLASH`; logical key remains code-defined | Implemented |
-| Kimi model selection | Configurable `MODEL_2_CORE`; logical key remains code-defined | Implemented |
+| Model 1 selection | Configurable logical key/aliases, physical `MODEL_1_FLASH`, generation parameters, and pricing | Implemented |
+| Model 2 selection | Configurable logical key/aliases, physical `MODEL_2_CORE`, generation parameters, and pricing | Implemented |
 | Local embedding provider | ONNX MiniLM through Chroma dependency | Implemented |
-| Reformulation provider | Logical `kimi` key | Implemented, provider-specific assumption |
-| Candidate reasoning providers | Logical `kimi` and `qwen` keys | Implemented, provider-specific assumption |
-| Synthesis provider | Logical `kimi` key | Implemented, provider-specific assumption |
+| Reformulation provider | Configured Model 1 role | Implemented, NVIDIA-specific |
+| Candidate reasoning providers | Configured Model 1 and Model 2 roles | Implemented, NVIDIA-specific |
+| Synthesis provider | Configured Model 2 role | Implemented, NVIDIA-specific |
 | Provider-native stream parsing | NVIDIA transport supports it | Implemented but unused by canonical API path |
 | Provider-neutral error/usage contract | Exceptions and text only; no normalized usage/error taxonomy | Partially Implemented |
 | Additional external provider adapters | None in current repository | Planned through reserved RFC-0004, not implemented |
-| Vertex AI/Anthropic direct runtime | No active implementation | Unsupported |
+| Vertex AI/Google AI/Anthropic direct runtime | Removed; compatibility aliases resolve only to configured NVIDIA NIM routes | Unsupported |
 
 Retries cover HTTP/network failures and selected retryable status codes with exponential backoff and optional `Retry-After`; configured maximum retries default to three. Connect, read, write, and pool timeouts are defined in the transport. Structured output is enforced by prompts and parsing rather than a provider-independent schema capability.
 
@@ -284,8 +292,14 @@ The architecture is suitable for development and controlled evaluation. It is co
 - Interactions and selected errors append JSON records to a configured local audit path.
 - Standard logging is used across API, session, context, provider, tooling, and lifecycle components.
 - SSE exposes reformulation and retrieved-context diagnostic events to the requesting client, which may reveal sensitive recalled content.
-- Benchmark reports record transport success, latency, response excerpts, and estimated token fields.
-- No metrics service, distributed trace correlation, redaction policy, retention policy, or production alerting is implemented.
+- The live API emits typed usage records when provider usage is available and
+  retains explicit estimates otherwise; its legacy `token_usage` event remains
+  character-based and is not billing-grade.
+- The evidence runner records raw outputs, evaluator results, failures,
+  latency, usage, statistics, provenance, checksums, and certification state.
+- Audit content redaction, file permissions, and size-bounded rotation are
+  implemented. No metrics service, distributed trace correlation, retention
+  duration, audit deletion workflow, or production alerting is implemented.
 - Existing benchmark artifacts are historical evidence and are not rewritten by architecture governance.
 
 ## 19. Architecture Invariants
@@ -301,15 +315,24 @@ The architecture is suitable for development and controlled evaluation. It is co
 | Background indexing does not re-create a burned session | direct collection reference and missing-collection guard | session runtime source, lifecycle tests | Race coverage is limited |
 | Experimental subsystems do not become MVP dependencies | optional Graphify/clients and Product Boundary | RFC-0001, dependency inspection | No automated dependency-policy check |
 | Durable learned facts remain separate from ephemeral session memory | `MemoryManager` file vs SessionRecord metadata | source inspection | Web and daemon semantics differ and are not contract-tested together |
-| Commercial claims require repeatable evidence | Governance documents and RFC template | RFC-0001, RFC process | Current benchmark lacks answer-quality scoring |
+| Commercial claims require repeatable evidence | Governance documents, accepted RFC-0003, evaluators, statistics, and certification gates | `evaluation/test_evidence_platform.py`, immutable smoke artifacts | Governed live Validation/Final Evaluation campaigns and human adjudication remain incomplete |
+| Declared token budgets must correspond to enforced model inputs | Session metadata, prompt builders, and provider usage records | Source inspection shows `token_budget=2500` is exposed but not consumed | No tokenizer-backed admission or per-turn budget enforcement |
 
 Future changes that violate an invariant require a superseding RFC or must restore compliance before acceptance.
 
 ## 20. Known Limitations and Liabilities
 
-The detailed register is [architecture/ARCHITECTURE_GAPS.md](architecture/ARCHITECTURE_GAPS.md). The most consequential current limits are unauthenticated session access, process-local state for public deployment, incomplete provider neutrality, simulated response chunking, variable total token use, unvalidated Graphify/dual-model outcomes, and auxiliary durable state outside burn semantics.
+The detailed reconciled register is
+[architecture/ARCHITECTURE_GAPS.md](architecture/ARCHITECTURE_GAPS.md). The
+most consequential current limits are unauthenticated session access,
+process-local state for public deployment, incomplete provider neutrality,
+staged rather than provider-token streaming, an exposed but unenforced token
+budget, incomplete live claim certification, and auxiliary durable state
+outside burn semantics.
 
-No future proposal is implemented merely because it appears here. RFC-0003 remains reserved for benchmark methodology and RFC-0004 for provider abstraction.
+No future proposal is implemented merely because it appears here. RFC-0003 is
+the accepted benchmark methodology; RFC-0004 remains reserved for provider
+abstraction.
 
 ## 21. Decisions and Governance Links
 
@@ -321,5 +344,8 @@ No future proposal is implemented merely because it appears here. RFC-0003 remai
 - [ADR-0005: Security and Trust Boundaries](architecture/ADR-0005-security-and-trust-boundaries.md)
 - [RFC-0001: Product Boundary](rfcs/RFC-0001-product-boundary.md)
 - [RFC-0002: Architecture Canonicalization](rfcs/RFC-0002-architecture-canonicalization.md)
+- [RFC-0003: Benchmark Methodology](rfcs/RFC-0003-benchmark-methodology.md)
 
-These accepted records document current behavior. Proposed provider or benchmark changes require their own review and must not be inferred from this architecture.
+These accepted records govern current behavior and evidence. Proposed provider,
+token-budget, or methodology changes require their own review and must not be
+inferred from this architecture.

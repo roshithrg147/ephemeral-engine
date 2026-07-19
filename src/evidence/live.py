@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -7,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from src.clients import NIMResponse, NVIDIA_NIM_Client
 from src.config import settings
 
 from .baselines import (
@@ -26,91 +28,45 @@ class NvidiaReasoner:
     provider = "nvidia-nim"
     version = "1.0.0"
 
-    def __init__(self, *, model: str | None = None, timeout: float = 45.0, max_retries: int = 3):
-        self.model = model or settings.MODEL_1_FLASH
-        self.timeout = timeout
-        self.max_retries = max_retries
+    def __init__(
+        self,
+        *,
+        model: str | None = None,
+        timeout: float | None = None,
+        max_retries: int | None = None,
+    ):
+        self.model = model or settings.MODEL_1_KEY
+        self.timeout = timeout or settings.NVIDIA_READ_TIMEOUT_SECONDS
+        self.max_retries = settings.NVIDIA_MAX_RETRIES if max_retries is None else max_retries
         self.last_metadata: dict[str, Any] = {}
-        self._client = httpx.Client(timeout=timeout)
+        self._client = NVIDIA_NIM_Client()
 
     def complete(self, *, prompt: str, context: str, seed: int) -> str:
         self.last_metadata = {}
-        api_key = settings.NVIDIA_API_KEY_QWEN or settings.NVIDIA_API_KEY
-        if not api_key:
-            raise RuntimeError("NVIDIA API key is not configured")
-        payload = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": f"Context:\n{context}\n\nPrompt:\n{prompt}"}],
-            "temperature": 0.0,
-            "top_p": 1.0,
-            "max_tokens": 512,
-            "stream": False,
-            "seed": seed,
-        }
-        started = time.perf_counter()
-        attempts = []
-        response = None
-        for attempt in range(self.max_retries + 1):
-            attempt_start = time.perf_counter()
-            try:
-                response = self._client.post(
-                    "https://integrate.api.nvidia.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
-                attempts.append(
-                    {
-                        "attempt": attempt + 1,
-                        "status": response.status_code,
-                        "seconds": time.perf_counter() - attempt_start,
-                    }
-                )
-                if response.status_code == 200:
-                    break
-                if (
-                    response.status_code not in {429, 500, 502, 503, 504}
-                    or attempt == self.max_retries
-                ):
-                    response.raise_for_status()
-            except (httpx.HTTPError, httpx.TimeoutException) as exc:
-                attempts.append(
-                    {
-                        "attempt": attempt + 1,
-                        "error": type(exc).__name__,
-                        "seconds": time.perf_counter() - attempt_start,
-                    }
-                )
-                if attempt == self.max_retries:
-                    self.last_metadata = {
-                        "attempts": attempts,
-                        "latency_seconds": time.perf_counter() - started,
-                    }
-                    if isinstance(exc, httpx.TimeoutException):
-                        raise TimeoutError(str(exc)) from exc
-                    raise
-            time.sleep(2**attempt)
-        if response is None:
-            raise RuntimeError("provider produced no response")
-        body = response.json()
-        text = body["choices"][0]["message"].get("content") or body["choices"][0]["message"].get(
-            "reasoning_content"
+        input_text = f"Context:\n{context}\n\nPrompt:\n{prompt}"
+        try:
+            response = self._client.call_llm(
+                model_key=self.model,
+                prompt=input_text,
+                max_tokens=settings.MODEL_REFORMULATION_MAX_TOKENS,
+                request_timeout_seconds=self.timeout,
+                max_retries=self.max_retries,
+                seed=seed,
+            )
+        except httpx.TimeoutException as exc:
+            raise TimeoutError(str(exc)) from exc
+        if not isinstance(response, NIMResponse):
+            raise RuntimeError("NVIDIA NIM client returned an unexpected response type")
+        self.last_metadata = dict(response.provider_metadata)
+        self.last_metadata["usage"] = _usage_record(
+            response.usage,
+            input_text,
+            str(response),
         )
-        if not text:
-            raise RuntimeError("provider response contained no completion text")
-        usage = body.get("usage")
-        self.last_metadata = {
-            "attempts": attempts,
-            "latency_seconds": time.perf_counter() - started,
-            "usage": _usage_record(usage, prompt + context, str(text)),
-            "provider_request_id": response.headers.get("x-request-id"),
-        }
-        return str(text)
+        return str(response)
 
     def close(self) -> None:
-        self._client.close()
+        asyncio.run(self._client.aclose())
 
 
 def _usage_record(provider_usage: dict | None, input_text: str, output_text: str) -> dict[str, Any]:

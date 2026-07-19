@@ -45,7 +45,7 @@ SPINNERS["super_me"] = {
     ],
 }
 
-MIDDLEWARE_BASE = os.getenv("SC_EVM_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+MIDDLEWARE_BASE = settings.SC_EVM_BASE_URL.rstrip("/")
 SESSION_ID = os.getenv("SC_EVM_SESSION_ID", "cli-tui-session-001")
 
 

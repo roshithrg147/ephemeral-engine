@@ -356,7 +356,7 @@ class SessionRecord:
             "pending_commit_buffer": [],
             "base_threshold": float(self._calibrate_threshold()),
             "development_phase": settings.DEVELOPMENT_PHASE,
-            "token_budget": 2500,
+            "token_budget": settings.SESSION_TOKEN_BUDGET,
         }
 
         self.collection: Collection = self.chroma_client.get_or_create_collection(
@@ -388,12 +388,20 @@ class SessionRecord:
             neg_pair = self.embedding_fn(["The quick brown fox jumps over the lazy dog"])
             pos_dist = cosine_dist(pos_pairs[0], pos_pairs[1])
             neg_dist = cosine_dist(pos_pairs[0], neg_pair[0])
-            dynamic_threshold = pos_dist + ((neg_dist - pos_dist) * 0.3)
-            _calibrated_threshold = max(0.1, min(0.9, dynamic_threshold))
+            dynamic_threshold = pos_dist + (
+                (neg_dist - pos_dist) * settings.RETRIEVAL_CALIBRATION_WEIGHT
+            )
+            _calibrated_threshold = max(
+                settings.RETRIEVAL_MIN_DISTANCE_THRESHOLD,
+                min(settings.RETRIEVAL_MAX_DISTANCE_THRESHOLD, dynamic_threshold),
+            )
         except Exception as e:
-            logger.warning("Dynamic calibration failed, falling back to 0.52", exc_info=True)
+            logger.warning(
+                "Dynamic calibration failed; using configured fallback threshold",
+                exc_info=True,
+            )
             log_error("memory.session_record.dynamic_calibration", str(e))
-            _calibrated_threshold = 0.52
+            _calibrated_threshold = settings.RETRIEVAL_BASE_DISTANCE_THRESHOLD
         return _calibrated_threshold
 
     def refresh_manifest(self) -> StateManifest:

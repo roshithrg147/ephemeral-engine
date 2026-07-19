@@ -7,6 +7,8 @@ import tempfile
 
 import httpx
 
+from src.config import settings
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -108,7 +110,10 @@ def main():
     parser = argparse.ArgumentParser(description="SC-EVM Secure Lifecycle Manager")
     parser.add_argument("--session-id", type=str, required=True, help="Session ID to destroy/burn")
     parser.add_argument(
-        "--api-url", type=str, default="http://127.0.0.1:8000", help="FastAPI microservice base URL"
+        "--api-url",
+        type=str,
+        default=settings.SC_EVM_BASE_URL,
+        help="FastAPI microservice base URL",
     )
 
     args = parser.parse_args()
