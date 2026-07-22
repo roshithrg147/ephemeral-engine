@@ -14,13 +14,15 @@ async def main():
         sys.exit(1)
 
     client = NVIDIA_NIM_Client()
-    models = [settings.MODEL_1_FLASH, settings.MODEL_2_CORE]
+    models = [
+        (settings.MODEL_1_KEY, settings.MODEL_1_FLASH),
+        (settings.MODEL_2_KEY, settings.MODEL_2_CORE),
+    ]
 
     success = True
-    for model in models:
+    for model_key, model in models:
         print(f"Testing reachability and completion for model: {model}...")
         try:
-            model_key = "qwen" if "qwen" in model.lower() else "kimi"
             fut = client.call_llm_async(
                 model_key=model_key,
                 prompt="test connectivity",

@@ -22,9 +22,12 @@ def test_model_1_payload_uses_configured_nvidia_route(
     )
 
     assert payload["model"] == settings.MODEL_1_FLASH
-    assert payload["chat_template_kwargs"] == {"enable_thinking": False}
     assert payload["temperature"] == settings.MODEL_1_TEMPERATURE
     assert payload["top_p"] == settings.MODEL_1_TOP_P
+    if settings.MODEL_1_FLASH.lower().startswith("qwen/"):
+        assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+    else:
+        assert "chat_template_kwargs" not in payload
 
 
 def test_model_2_payload_uses_configured_nvidia_route(
@@ -42,25 +45,38 @@ def test_model_2_payload_uses_configured_nvidia_route(
     assert payload["model"] == settings.MODEL_2_CORE
     assert payload["temperature"] == settings.MODEL_2_TEMPERATURE
     assert payload["top_p"] == settings.MODEL_2_TOP_P
-    if settings.MODEL_2_CORE == settings.MODEL_1_FLASH:
+    if settings.MODEL_2_CORE.lower().startswith("qwen/"):
         assert payload["chat_template_kwargs"] == {"enable_thinking": False}
     else:
-        assert payload["thinking"] == {"type": "disabled"}
+        assert "chat_template_kwargs" not in payload
+    assert "thinking" not in payload
 
 
-@pytest.mark.parametrize("model_key", ["kiwi", "kimi", "claude", "opus", "model_2"])
+@pytest.mark.parametrize("model_key", ["gpt_oss", "gpt-oss", "openai", "kiwi", "model_2"])
 def test_model_2_aliases_resolve_to_configured_nvidia_route(
     monkeypatch: pytest.MonkeyPatch,
     model_key: str,
 ) -> None:
     monkeypatch.setattr(settings, "NVIDIA_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "NVIDIA_API_KEY_KIWI", "model-2-key")
 
     model_name, temperature, top_p, api_key = NVIDIA_NIM_Client()._map_model(model_key)
 
     assert model_name == settings.MODEL_2_CORE
     assert temperature == settings.MODEL_2_TEMPERATURE
     assert top_p == settings.MODEL_2_TOP_P
-    assert api_key == "test-key"
+    assert api_key == "model-2-key"
+
+
+def test_model_2_route_falls_back_to_general_nvidia_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "NVIDIA_API_KEY", "general-key")
+    monkeypatch.setattr(settings, "NVIDIA_API_KEY_KIWI", "")
+
+    _, _, _, api_key = NVIDIA_NIM_Client()._map_model(settings.MODEL_2_KEY)
+
+    assert api_key == "general-key"
 
 
 def test_unknown_model_alias_is_rejected() -> None:
@@ -86,7 +102,7 @@ def test_extract_response_text_rejects_reasoning_only_response() -> None:
     result = {
         "choices": [
             {
-                "finish_reason": "length",
+                "finish_reason": "stop",
                 "message": {
                     "role": "assistant",
                     "reasoning_content": "private chain of thought",
@@ -100,6 +116,20 @@ def test_extract_response_text_rejects_reasoning_only_response() -> None:
 
     assert "private chain of thought" not in str(error.value)
     assert "reasoning_present=True" in str(error.value)
+
+
+def test_extract_response_text_rejects_truncated_visible_content() -> None:
+    result = {
+        "choices": [
+            {
+                "finish_reason": "length",
+                "message": {"role": "assistant", "content": "partial answer"},
+            }
+        ]
+    }
+
+    with pytest.raises(IncompleteModelResponseError, match="truncated"):
+        NVIDIA_NIM_Client._extract_response_text(result)
 
 
 def test_incomplete_response_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,17 +17,16 @@ class Settings(BaseSettings):
     NVIDIA_NIM_CHAT_COMPLETIONS_URL: str = "https://integrate.api.nvidia.com/v1/chat/completions"
 
     # NVIDIA NIM model registry
-    MODEL_1_KEY: str = "qwen"
-    MODEL_2_KEY: str = "kiwi"
-    MODEL_1_FLASH: str = "qwen/qwen3.5-122b-a10b"
-    MODEL_2_CORE: str = "moonshotai/kimi-k2.6"
+    MODEL_1_KEY: str = "nemotron"
+    MODEL_2_KEY: str = "core"
+    MODEL_1_FLASH: str = "nvidia/nemotron-3-nano-30b-a3b"
+    MODEL_2_CORE: str = "openai/gpt-oss-120b"
     MODEL_1_ALIASES: tuple[str, ...] = ("qwen", "model_1", "model1")
     MODEL_2_ALIASES: tuple[str, ...] = (
+        "gpt_oss",
+        "gpt-oss",
+        "openai",
         "kiwi",
-        "kimi",
-        "moonshot",
-        "claude",
-        "opus",
         "model_2",
         "model2",
     )
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     MODEL_2_INPUT_PRICE_PER_1K: float = Field(default=0.0005, ge=0.0)
     MODEL_2_OUTPUT_PRICE_PER_1K: float = Field(default=0.0006, ge=0.0)
     MODEL_CANDIDATE_MAX_TOKENS: int = Field(default=2048, ge=1, le=131_072)
-    MODEL_REFORMULATION_MAX_TOKENS: int = Field(default=512, ge=1, le=131_072)
+    MODEL_REFORMULATION_MAX_TOKENS: int = Field(default=1024, ge=1, le=131_072)
     MODEL_SYNTHESIS_MAX_TOKENS: int = Field(default=1536, ge=1, le=131_072)
 
     # Network Security
@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     COMMAND_TIMEOUT_SECONDS: int = Field(default=300, ge=1, le=3600)
     IPC_MAX_PAYLOAD_BYTES: int = Field(default=1024 * 1024, ge=1024, le=16 * 1024 * 1024)
     WORKSPACE_MAX_FILE_BYTES: int = Field(default=2 * 1024 * 1024, ge=1024)
+    SANDBOX_ROOT: Path = Field(default=Path("./sandboxes"), validation_alias="SC_EVM_SANDBOX_ROOT")
 
     # GC and Session Management
     GC_TTL_SECONDS: int = Field(default=3600, ge=1)

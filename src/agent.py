@@ -56,6 +56,8 @@ class RefinedResponse(BaseModel):
         description="List of new facts, preferences, or updates about the user to store in long term memory.",
     )
     usage_records: list[dict[str, Any]] | None = None
+    degraded: bool = False
+    degradation_reasons: list[str] = Field(default_factory=list)
 
 
 class AgentOrchestrator:
@@ -103,7 +105,7 @@ class AgentOrchestrator:
     def generate_response(
         self, memory_snapshot: MemorySnapshot | dict[str, Any], user_prompt: str
     ) -> RefinedResponse:
-        """Queries Kimi and Qwen in parallel, then synthesizes/refines the response."""
+        """Query the configured Model 1 and Model 2 in parallel, then synthesize the response."""
         if isinstance(memory_snapshot, dict):
             memory_snapshot = MemorySnapshot(**memory_snapshot)
 
@@ -114,6 +116,8 @@ class AgentOrchestrator:
         # Call models in parallel threads
         model_1_response = None
         model_2_response = None
+        model_failures: dict[str, str] = {}
+        degradation_reasons: list[str] = []
 
         futures = {
             "model_2": _MODEL_EXECUTOR.submit(
@@ -141,10 +145,12 @@ class AgentOrchestrator:
                     model_1_response = result
             except Exception as e:
                 log_error(f"agent.generate_response.{name}", str(e))
+                model_failures[name] = type(e).__name__
+                degradation_reasons.append(f"{name}_candidate_failed")
                 if name == "model_2":
-                    model_2_response = f"[Model 2 failed: {e}]"
+                    model_2_response = "[Model 2 unavailable]"
                 else:
-                    model_1_response = f"[Model 1 failed: {e}]"
+                    model_1_response = "[Model 1 unavailable]"
 
         # Synthesize both responses
         refined = self.synthesize_responses(
@@ -152,6 +158,8 @@ class AgentOrchestrator:
             model_2_response,
             model_1_response,
             lt_context,
+            degradation_reasons=degradation_reasons,
+            model_failures=model_failures,
         )
 
         # Send refined response to the clipboard daemon
@@ -186,14 +194,35 @@ class AgentOrchestrator:
         model_2_response: Any,
         model_1_response: Any,
         lt_context: str,
+        *,
+        degradation_reasons: list[str] | None = None,
+        model_failures: dict[str, str] | None = None,
     ) -> RefinedResponse:
         """Use the configured NVIDIA NIM synthesis role to refine both responses."""
+        degradation_reasons = list(degradation_reasons or [])
+        model_failures = dict(model_failures or {})
         synthesis_prompt = self.prompt_manager.build_synthesis_prompt(
             long_term_context=lt_context,
             user_prompt=user_prompt,
             model_2_response=model_2_response,
             model_1_response=model_1_response,
         )
+        records = [
+            self._usage_record(
+                stage="model_2_candidate",
+                model=settings.MODEL_2_CORE,
+                response=model_2_response,
+                estimated_input_tokens=len(user_prompt) // 4,
+                failure=model_failures.get("model_2"),
+            ),
+            self._usage_record(
+                stage="model_1_candidate",
+                model=settings.MODEL_1_FLASH,
+                response=model_1_response,
+                estimated_input_tokens=len(user_prompt) // 4,
+                failure=model_failures.get("model_1"),
+            ),
+        ]
         try:
             response_text = self.model_connector.call(
                 model_key=self.synthesis_model_key,
@@ -204,149 +233,110 @@ class AgentOrchestrator:
             text_clean = strip_code_fences(response_text)
             data = json.loads(text_clean)
             refined = RefinedResponse(**data)
-
-            # Compile usage records
-            from src.clients import get_model_price
-
-            records = []
-
-            # 1. Model 2 candidate call
-            model_2_usage = getattr(model_2_response, "usage", None)
-            if model_2_usage:
-                records.append(
-                    {
-                        "measurement_type": "exact",
-                        "provider": "nvidia",
-                        "model": self.model_2_key,
-                        "tokenizer": None,
-                        "input_tokens": model_2_usage.get("prompt_tokens"),
-                        "output_tokens": model_2_usage.get("completion_tokens"),
-                        "cached_tokens": None,
-                        "retry_usage": None,
-                        "missing_reason": None,
-                        "price_table_version": "v1.0",
-                        "calculated_cost": (model_2_usage.get("prompt_tokens", 0) / 1000.0)
-                        * get_model_price(self.model_2_key)["input_1k"]
-                        + (model_2_usage.get("completion_tokens", 0) / 1000.0)
-                        * get_model_price(self.model_2_key)["output_1k"],
-                    }
+            records.append(
+                self._usage_record(
+                    stage="model_2_synthesis",
+                    model=settings.MODEL_2_CORE,
+                    response=response_text,
+                    estimated_input_tokens=len(synthesis_prompt) // 4,
                 )
-            else:
-                records.append(
-                    {
-                        "measurement_type": "estimate",
-                        "provider": "nvidia",
-                        "model": self.model_2_key,
-                        "tokenizer": None,
-                        "input_tokens": len(user_prompt) // 4,
-                        "output_tokens": len(
-                            getattr(model_2_response, "text", str(model_2_response))
-                        )
-                        // 4,
-                        "cached_tokens": None,
-                        "retry_usage": None,
-                        "missing_reason": "exact usage not returned by provider",
-                        "price_table_version": "v1.0",
-                        "calculated_cost": None,
-                    }
-                )
-
-            # 2. Model 1 candidate call
-            model_1_usage = getattr(model_1_response, "usage", None)
-            if model_1_usage:
-                records.append(
-                    {
-                        "measurement_type": "exact",
-                        "provider": "nvidia",
-                        "model": self.model_1_key,
-                        "tokenizer": None,
-                        "input_tokens": model_1_usage.get("prompt_tokens"),
-                        "output_tokens": model_1_usage.get("completion_tokens"),
-                        "cached_tokens": None,
-                        "retry_usage": None,
-                        "missing_reason": None,
-                        "price_table_version": "v1.0",
-                        "calculated_cost": (model_1_usage.get("prompt_tokens", 0) / 1000.0)
-                        * get_model_price(self.model_1_key)["input_1k"]
-                        + (model_1_usage.get("completion_tokens", 0) / 1000.0)
-                        * get_model_price(self.model_1_key)["output_1k"],
-                    }
-                )
-            else:
-                records.append(
-                    {
-                        "measurement_type": "estimate",
-                        "provider": "nvidia",
-                        "model": self.model_1_key,
-                        "tokenizer": None,
-                        "input_tokens": len(user_prompt) // 4,
-                        "output_tokens": len(
-                            getattr(model_1_response, "text", str(model_1_response))
-                        )
-                        // 4,
-                        "cached_tokens": None,
-                        "retry_usage": None,
-                        "missing_reason": "exact usage not returned by provider",
-                        "price_table_version": "v1.0",
-                        "calculated_cost": None,
-                    }
-                )
-
-            # 3. Synthesis call
-            synth_usage = getattr(response_text, "usage", None)
-            if synth_usage:
-                records.append(
-                    {
-                        "measurement_type": "exact",
-                        "provider": "nvidia",
-                        "model": self.synthesis_model_key,
-                        "tokenizer": None,
-                        "input_tokens": synth_usage.get("prompt_tokens"),
-                        "output_tokens": synth_usage.get("completion_tokens"),
-                        "cached_tokens": None,
-                        "retry_usage": None,
-                        "missing_reason": None,
-                        "price_table_version": "v1.0",
-                        "calculated_cost": (synth_usage.get("prompt_tokens", 0) / 1000.0)
-                        * get_model_price(self.synthesis_model_key)["input_1k"]
-                        + (synth_usage.get("completion_tokens", 0) / 1000.0)
-                        * get_model_price(self.synthesis_model_key)["output_1k"],
-                    }
-                )
-            else:
-                records.append(
-                    {
-                        "measurement_type": "estimate",
-                        "provider": "nvidia",
-                        "model": self.synthesis_model_key,
-                        "tokenizer": None,
-                        "input_tokens": len(synthesis_prompt) // 4,
-                        "output_tokens": len(text_clean) // 4,
-                        "cached_tokens": None,
-                        "retry_usage": None,
-                        "missing_reason": "exact usage not returned by provider",
-                        "price_table_version": "v1.0",
-                        "calculated_cost": None,
-                    }
-                )
-
+            )
             refined.usage_records = records
+            refined.degraded = bool(degradation_reasons)
+            refined.degradation_reasons = degradation_reasons
+            if degradation_reasons:
+                refined.text = f"[DEGRADED: {', '.join(degradation_reasons)}]\n\n{refined.text}"
             return refined
         except Exception as e:
             log_error("agent.synthesize", str(e))
-            # Graceful recovery if synthesis schema fails
-            fallback_text = (
-                model_1_response
-                if model_1_response and "[Model 1 failed" not in str(model_1_response)
-                else (
-                    model_2_response
-                    if model_2_response
-                    else "Both models failed to generate response."
+            degradation_reasons.append("model_2_synthesis_failed")
+            records.append(
+                self._usage_record(
+                    stage="model_2_synthesis",
+                    model=settings.MODEL_2_CORE,
+                    response=None,
+                    estimated_input_tokens=len(synthesis_prompt) // 4,
+                    failure=type(e).__name__,
                 )
             )
-            return RefinedResponse(
-                text=str(fallback_text), intent="chat", action=Action(type="none"), remember=[]
+            fallback_text = (
+                model_1_response if "model_1" not in model_failures else model_2_response
             )
+            return RefinedResponse(
+                text=(f"[DEGRADED: {', '.join(degradation_reasons)}]\n\n{fallback_text}"),
+                intent="chat",
+                action=Action(type="none"),
+                remember=[],
+                usage_records=records,
+                degraded=True,
+                degradation_reasons=degradation_reasons,
+            )
+
+    @staticmethod
+    def _usage_record(
+        *,
+        stage: str,
+        model: str,
+        response: Any,
+        estimated_input_tokens: int,
+        failure: str | None = None,
+    ) -> dict[str, Any]:
+        """Build one explicit success, estimate, or failure usage record."""
+        from src.clients import get_model_price
+
+        if failure:
+            return {
+                "measurement_type": "unavailable",
+                "status": "failed",
+                "stage": stage,
+                "provider": "nvidia",
+                "model": model,
+                "tokenizer": None,
+                "input_tokens": None,
+                "output_tokens": None,
+                "cached_tokens": None,
+                "retry_usage": None,
+                "missing_reason": f"{stage} failed: {failure}",
+                "price_table_version": "v1.0",
+                "calculated_cost": None,
+            }
+
+        usage = getattr(response, "usage", None)
+        if usage:
+            return {
+                "measurement_type": "exact",
+                "status": "completed",
+                "stage": stage,
+                "provider": "nvidia",
+                "model": model,
+                "tokenizer": None,
+                "input_tokens": usage.get("prompt_tokens"),
+                "output_tokens": usage.get("completion_tokens"),
+                "cached_tokens": None,
+                "retry_usage": None,
+                "missing_reason": None,
+                "price_table_version": "v1.0",
+                "calculated_cost": (usage.get("prompt_tokens", 0) / 1000.0)
+                * get_model_price(model)["input_1k"]
+                + (usage.get("completion_tokens", 0) / 1000.0)
+                * get_model_price(model)["output_1k"],
+            }
+
+        return {
+            "measurement_type": "estimate",
+            "status": "completed",
+            "stage": stage,
+            "provider": "nvidia",
+            "model": model,
+            "tokenizer": None,
+            "input_tokens": estimated_input_tokens,
+            "output_tokens": len(str(response or "")) // 4,
+            "cached_tokens": None,
+            "retry_usage": None,
+            "missing_reason": "exact usage not returned by provider",
+            "price_table_version": "v1.0",
+            "calculated_cost": None,
+        }
 
     def generate_image(self, prompt: str, filename: str = "images/output.png") -> str:
         """Stub image generation since Imagen is removed."""

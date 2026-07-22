@@ -5,8 +5,10 @@ import time
 from typing import Any
 
 from src.agent import Action, RefinedResponse
+from src.config import settings
 from src.services.model_connector import ModelConnector
 from src.services.prompt_manager import PromptManager
+from src.services.response_parsing import strip_code_fences
 from src.strategies.base import StrategyAdapter
 
 
@@ -15,7 +17,7 @@ class SingleModelAdapter(StrategyAdapter):
 
     use_remote_session = False
 
-    def __init__(self, model_key: str = "qwen"):
+    def __init__(self, model_key: str = settings.MODEL_1_KEY):
         super().__init__(name="single_model")
         self.model_key = model_key
         self.prompt_manager = PromptManager()
@@ -58,12 +60,7 @@ class SingleModelAdapter(StrategyAdapter):
         )
 
     def _parse_response(self, raw_text: str) -> RefinedResponse:
-        text = raw_text.strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
+        text = strip_code_fences(raw_text)
 
         try:
             data = json.loads(text)

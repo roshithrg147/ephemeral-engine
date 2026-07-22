@@ -1,0 +1,35 @@
+[project]
+name = "ollama-performance-benchmark"
+version = "0.1.0"
+description = "Isolated 50-turn performance benchmark for a local Ollama model."
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28.1,<1",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15",
+    "pytest>=8",
+    "ruff>=0.12",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true

@@ -18,8 +18,8 @@ If the user requests code generation for UI, frontend, or feature components, yo
 
     SYNTHESIS_SYSTEM_PROMPT = """You are the Synthesizer/Refiner for a Dual-LLM Personal Assistant.
 You have received two responses to the user's prompt:
-1. Response A (from Moonshot Kimi)
-2. Response B (from Qwen)
+1. Response A (from the configured NVIDIA NIM Model 2)
+2. Response B (from the configured NVIDIA NIM Model 1)
 
 Your task is to:
 1. Analyze both responses, weigh their facts, style, and correctness.
