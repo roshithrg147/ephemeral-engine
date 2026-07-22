@@ -272,13 +272,13 @@ The repository currently has these values in an ignored `engine-dashboard/.env.d
 | `SC_EVM_BASE_URL` | `http://127.0.0.1:8000` | No | Canonical local API origin used by CLI, lifecycle, evidence, and benchmark clients |
 | `SC_EVM_SINGLE_MODEL_BASE_URL` | `http://127.0.0.1:8001` | No | Single-model benchmark API origin |
 | `NVIDIA_NIM_CHAT_COMPLETIONS_URL` | NVIDIA hosted chat-completions URL | No | Sole external inference endpoint |
-| `MODEL_1_KEY` | `qwen` | No | Logical Model 1 role used for reformulation and the first candidate |
+| `MODEL_1_KEY` | `nemotron` | No | Logical Model 1 role used for reformulation and the first candidate |
 | `MODEL_2_KEY` | `kiwi` | No | Logical Model 2 role used for the second candidate and synthesis |
-| `MODEL_1_FLASH` | `qwen/qwen3.5-122b-a10b` | No | NVIDIA NIM physical model for Model 1 |
-| `MODEL_2_CORE` | `moonshotai/kimi-k2.6` | No | NVIDIA NIM physical model for Model 2 |
-| `MODEL_1_ALIASES` / `MODEL_2_ALIASES` | role-specific tuples | No | Exact accepted aliases; `claude` and `opus` are compatibility aliases for the configured NVIDIA Model 2 route, not direct Anthropic clients |
+| `MODEL_1_FLASH` | `nvidia/nemotron-3-nano-30b-a3b` | No | NVIDIA NIM physical model for Model 1 |
+| `MODEL_2_CORE` | `openai/gpt-oss-120b` | No | NVIDIA NIM physical model for Model 2 |
+| `MODEL_1_ALIASES` / `MODEL_2_ALIASES` | role-specific tuples | No | Exact accepted aliases for the configured NVIDIA model roles; `kiwi` remains a temporary compatibility alias for Model 2 |
 | `MODEL_CANDIDATE_MAX_TOKENS` | `2048` | No | Candidate response ceiling |
-| `MODEL_REFORMULATION_MAX_TOKENS` | `512` | No | Reformulation and evidence-reasoner response ceiling |
+| `MODEL_REFORMULATION_MAX_TOKENS` | `1024` | No | Reformulation and evidence-reasoner response ceiling |
 | `MODEL_SYNTHESIS_MAX_TOKENS` | `1536` | No | Structured synthesis response ceiling |
 | `CORS_ORIGINS` | localhost and 127.0.0.1 on port 3000 | No | JSON-encoded browser origin list |
 | `MAX_WORKER_THREADS` | `8` | No | API orchestration pool size; validated `2..64` |
@@ -528,13 +528,14 @@ Successful query event order:
 2. `query_reformulation`
 3. `retrieved_context` only when global or request diagnostic mode is enabled
 4. `response_content`
-5. `action`
-6. `usage_report`
-7. `token_usage`
-8. `intent`
-9. `done`
+5. `degradation` only when candidate or synthesis processing degraded
+6. `action`
+7. `usage_report`
+8. `token_usage`
+9. `intent`
+10. `done`
 
-Generation failure replaces events 4–8 with `error`, followed by `done`.
+Generation failure replaces events 4–9 with `error`, followed by `done`.
 
 | Event | Data shape | Semantics |
 | --- | --- | --- |
@@ -542,8 +543,9 @@ Generation failure replaces events 4–8 with `error`, followed by `done`.
 | `query_reformulation` | search query and grounded prompt | rewrite output or raw-prompt fallback |
 | `retrieved_context` | one-element string array | complete fused context; potentially sensitive; diagnostic only |
 | `response_content` | JSON string | complete synthesized answer in a single event |
+| `degradation` | `{"degraded":true,"reasons":[...]}` | explicit machine-readable notice that one or more model stages failed and fallback output may be present |
 | `action` | action object | classified proposal after phase gating |
-| `usage_report` | array of exact/estimated call records | rewrite plus primary/synthesis usage |
+| `usage_report` | array of exact/estimated/unavailable call records | rewrite plus stage-labeled candidate and synthesis usage or failure evidence |
 | `token_usage` | `{m1,m2}` | legacy character-based estimates |
 | `intent` | JSON string | synthesis-classified intent |
 | `error` | JSON string | generic generation failure |

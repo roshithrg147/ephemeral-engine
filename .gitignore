@@ -119,6 +119,7 @@ venv/
 ENV/
 env/
 .env/
+sandboxes/
 
 # Spyder project settings
 .spyderproject
@@ -215,3 +216,18 @@ evaluation/final/
 release/DAY*.md
 release/FINAL_PUBLIC_RELEASE_AUDIT.md
 release/PUBLICATION_DECISION.md
+
+# Ad hoc local benchmark/runtime outputs
+/antigravity_front_test_log.json
+/benchmark_results.json
+/codex_50_turn_analysis.json
+/codex_50_turn_events.jsonl
+/codex_50_turn_responses.txt
+/math500_benchmark_responses.txt
+/math500_benchmark_results.json
+/sc_evm_50_turn_analysis.json
+/sc_evm_50_turn_responses.txt
+/sc_evm_manual_test_log.json
+/analysis/benchmark_comparison/artifact.json
+/analysis/benchmark_comparison/derived_metrics.json
+/analysis/benchmark_comparison/comparison_report.html

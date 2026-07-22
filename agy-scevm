@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PYTHON=${SC_EVM_PYTHON:-"$SCRIPT_DIR/.venv/bin/python"}
+
+if [ ! -x "$PYTHON" ]; then
+    echo "agy-scevm: Python environment not found at $PYTHON" >&2
+    echo "Set SC_EVM_PYTHON to a Python executable with project dependencies." >&2
+    exit 127
+fi
+
+cd "$SCRIPT_DIR"
+exec "$PYTHON" -m src.agy_scevm "$@"

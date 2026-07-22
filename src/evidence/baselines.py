@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import math
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -18,19 +16,6 @@ def tokens(text: str) -> list[str]:
 
 def estimated_tokens(text: str) -> int:
     return max(1, len(text) // 4)
-
-
-def hashed_vector_diagnostic(text: str, dimensions: int = 64) -> list[float]:
-    vector = [0.0] * dimensions
-    for token in tokens(text):
-        index = int.from_bytes(hashlib.sha256(token.encode()).digest()[:4], "big") % dimensions
-        vector[index] += 1.0
-    magnitude = math.sqrt(sum(item * item for item in vector)) or 1.0
-    return [item / magnitude for item in vector]
-
-
-def cosine(left: list[float], right: list[float]) -> float:
-    return sum(a * b for a, b in zip(left, right, strict=True))
 
 
 class Reasoner(Protocol):

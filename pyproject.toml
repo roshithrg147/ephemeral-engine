@@ -32,6 +32,7 @@ dev = [
 
 [project.scripts]
 assistant = "src.cli:main"
+agy-scevm = "src.agy_scevm:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
@@ -39,7 +40,7 @@ exclude = ["src/tests/**"]
 
 [tool.pytest.ini_options]
 addopts = "-m 'not live and not network'"
-testpaths = ["src/tests", "evaluation"]
+testpaths = ["src/tests", "tests", "evaluation"]
 markers = [
     "live: requires a separately running SC-EVM backend and configured provider",
     "network: opens localhost sockets or calls network services",

@@ -148,12 +148,12 @@ class NVIDIA_NIM_Client:
             model_name = settings.MODEL_1_FLASH
             temp = settings.MODEL_1_TEMPERATURE
             top_p = settings.MODEL_1_TOP_P
-            api_key = settings.NVIDIA_API_KEY or settings.NVIDIA_API_KEY_QWEN
+            api_key = settings.NVIDIA_API_KEY_QWEN or settings.NVIDIA_API_KEY
         elif normalized_key in model_2_keys:
             model_name = settings.MODEL_2_CORE
             temp = settings.MODEL_2_TEMPERATURE
             top_p = settings.MODEL_2_TOP_P
-            api_key = settings.NVIDIA_API_KEY or settings.NVIDIA_API_KEY_KIWI
+            api_key = settings.NVIDIA_API_KEY_KIWI or settings.NVIDIA_API_KEY
         else:
             supported = sorted(model_1_keys | model_2_keys)
             raise ValueError(
@@ -201,10 +201,8 @@ class NVIDIA_NIM_Client:
         if seed is not None:
             payload["seed"] = seed
         model_lower = model_name.strip().lower()
-        if model_lower == settings.MODEL_1_FLASH.lower():
+        if model_lower.startswith("qwen/"):
             payload["chat_template_kwargs"] = {"enable_thinking": False}
-        elif model_lower == settings.MODEL_2_CORE.lower():
-            payload["thinking"] = {"type": "disabled"}
         return payload
 
     def _request_parts(
@@ -242,6 +240,12 @@ class NVIDIA_NIM_Client:
 
         first_choice = choices[0] or {}
         message = first_choice.get("message") or {}
+        finish_reason = first_choice.get("finish_reason")
+
+        if finish_reason == "length":
+            raise IncompleteModelResponseError(
+                "provider response was truncated (finish_reason='length')"
+            )
 
         def _flatten_reasoning(value: Any) -> str:
             if isinstance(value, str):
@@ -289,7 +293,6 @@ class NVIDIA_NIM_Client:
         if isinstance(choice_text, str) and choice_text.strip():
             return choice_text
 
-        finish_reason = first_choice.get("finish_reason")
         reasoning_present = bool(_flatten_reasoning(message.get("reasoning_content")))
         raise IncompleteModelResponseError(
             "provider returned no user-facing assistant content "
@@ -429,6 +432,7 @@ class NVIDIA_NIM_Client:
                 if response.status_code == 200:
                     result = response.json()
                     usage = result.get("usage")
+                    first_choice = (result.get("choices") or [{}])[0] or {}
                     try:
                         text = self._extract_response_text(result)
                         return NIMResponse(
@@ -438,10 +442,10 @@ class NVIDIA_NIM_Client:
                                 "attempts": attempts,
                                 "latency_seconds": time.perf_counter() - started,
                                 "provider_request_id": response.headers.get("x-request-id"),
+                                "finish_reason": first_choice.get("finish_reason"),
                             },
                         )
                     except IncompleteModelResponseError:
-                        first_choice = (result.get("choices") or [{}])[0] or {}
                         logger.warning(
                             "NVIDIA response missing assistant text",
                             extra={

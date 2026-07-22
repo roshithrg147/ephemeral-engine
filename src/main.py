@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.agent import AgentOrchestrator
@@ -28,6 +28,7 @@ from src.services.session_runtime import (
     index_interaction,
 )
 from src.telemetry_sink import log_error
+from src.tools import sandbox_fs
 
 # Instantiate a global instance of SCEVMEngine containing the NVIDIA client
 sc_evm_engine = SCEVMEngine()
@@ -196,6 +197,18 @@ async def burn_session(
         raise HTTPException(status_code=500, detail="Failed to flush session") from e
 
 
+@app.post("/api/session/burn/{session_id}", status_code=204, response_class=Response)
+async def burn_sandbox_session(
+    session_id: Annotated[str, Path()],
+) -> Response:
+    """Permanently destroy one session's filesystem sandbox."""
+    try:
+        sandbox_fs.burn_session(session_id)
+    except sandbox_fs.SandboxViolation as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(status_code=204)
+
+
 @app.get("/api/session/history/{session_id}", response_model=StandardResponseEnvelope)
 async def get_session_history(
     session_id: Annotated[
@@ -308,7 +321,7 @@ async def _sse_query_generator_locked(
 
     yield f"event: metadata\ndata: {json.dumps({'tokensSaved': tokens_saved, 'memoryAnchors': memory_anchors})}\n\n"
 
-    # 2. Query Reformulation using NVIDIA NIM Qwen model
+    # 2. Query reformulation using the configured NVIDIA NIM Model 1 route
     rewrite_usage = None
     try:
         reformulation_res = await sc_evm_engine.run_query_reformulation_async(prompt, history)
@@ -403,6 +416,13 @@ async def _sse_query_generator_locked(
         # Staged response delivery: Yield the complete staged response content in a single event without delay
         yield f"event: response_content\ndata: {json.dumps(full_response_text)}\n\n"
 
+        if refined_response.degraded:
+            degradation_payload = {
+                "degraded": True,
+                "reasons": refined_response.degradation_reasons,
+            }
+            yield f"event: degradation\ndata: {json.dumps(degradation_payload)}\n\n"
+
         # Yield action payload over SSE
         yield f"event: action\ndata: {json.dumps(action_payload)}\n\n"
 
@@ -414,8 +434,10 @@ async def _sse_query_generator_locked(
             rewrite_record.append(
                 {
                     "measurement_type": "exact",
+                    "status": "completed",
+                    "stage": "model_1_reformulation",
                     "provider": "nvidia",
-                    "model": settings.MODEL_2_CORE,
+                    "model": settings.MODEL_1_FLASH,
                     "tokenizer": None,
                     "input_tokens": rewrite_usage.get("prompt_tokens"),
                     "output_tokens": rewrite_usage.get("completion_tokens"),
@@ -424,17 +446,19 @@ async def _sse_query_generator_locked(
                     "missing_reason": None,
                     "price_table_version": "v1.0",
                     "calculated_cost": (rewrite_usage.get("prompt_tokens", 0) / 1000.0)
-                    * get_model_price(settings.MODEL_2_CORE)["input_1k"]
+                    * get_model_price(settings.MODEL_1_FLASH)["input_1k"]
                     + (rewrite_usage.get("completion_tokens", 0) / 1000.0)
-                    * get_model_price(settings.MODEL_2_CORE)["output_1k"],
+                    * get_model_price(settings.MODEL_1_FLASH)["output_1k"],
                 }
             )
         else:
             rewrite_record.append(
                 {
                     "measurement_type": "estimate",
+                    "status": "completed",
+                    "stage": "model_1_reformulation",
                     "provider": "nvidia",
-                    "model": settings.MODEL_2_CORE,
+                    "model": settings.MODEL_1_FLASH,
                     "tokenizer": None,
                     "input_tokens": len(prompt) // 4,
                     "output_tokens": len(search_vector_query + grounded_llm_prompt) // 4,

@@ -14,7 +14,7 @@ The Product Manifesto requires choice beneath SC-EVM, while the current reposito
 
 `ModelConnector` is the canonical provider boundary. Context and strategy callers supply a logical model key, messages or text, system control, token limit, and synchronous or asynchronous intent. Transport adapters own credentials, endpoints, payload mapping, retry, timeout, and response extraction. They must never own session, retention, or burn state.
 
-The current implementation supports NVIDIA NIM only. Qwen and Kimi identifiers are configurable, but their logical roles in reformulation, candidate reasoning, and synthesis are code-defined. Local ONNX MiniLM supplies embeddings. Vertex AI, Anthropic, and other direct adapters are unsupported.
+The current implementation supports NVIDIA NIM only. Physical model identifiers are configurable, but their logical roles in reformulation, candidate reasoning, and synthesis are code-defined. Local ONNX MiniLM supplies embeddings. Vertex AI, Anthropic, and other direct adapters are unsupported.
 
 ## Rationale
 

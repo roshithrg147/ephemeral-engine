@@ -1,16 +1,8 @@
-import hashlib
 import json
 from pathlib import Path
 
+from src.evidence.artifacts import sha256_file
 from src.evidence.loaders import load_scenario
-
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(8192):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def main():

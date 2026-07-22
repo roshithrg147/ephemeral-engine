@@ -45,6 +45,19 @@ class FailedOrchestrator:
         raise RuntimeError("provider details must stay internal")
 
 
+class DegradedOrchestrator:
+    def generate_response(self, memory_snapshot, prompt):
+        return RefinedResponse(
+            text="degraded response",
+            intent="test",
+            action=Action(type="none"),
+            remember=[],
+            usage_records=[],
+            degraded=True,
+            degradation_reasons=["model_2_synthesis_failed"],
+        )
+
+
 def test_query_pipeline_emits_response_and_commits_state(monkeypatch):
     async def exercise():
         fake_engine = FakeEngine()
@@ -135,6 +148,43 @@ def test_failed_query_does_not_commit_empty_history(monkeypatch):
         assert "provider details must stay internal" not in events
         record = await main.session_registry.get_session(session_id)
         assert list(record.chat_history) == []
+        await main.session_registry.flush_session(session_id)
+
+    asyncio.run(asyncio.wait_for(exercise(), timeout=10))
+
+
+def test_query_pipeline_emits_degradation_event(monkeypatch):
+    async def exercise():
+        fake_engine = FakeEngine()
+
+        async def fake_get_orchestrator():
+            return DegradedOrchestrator()
+
+        async def fake_run_orchestrator(orchestrator, memory_snapshot, prompt):
+            return orchestrator.generate_response(memory_snapshot, prompt)
+
+        async def no_documents(record, session_id):
+            return []
+
+        async def fake_embed_text(record, text):
+            return [1.0, 0.0]
+
+        def discard_indexing(coro):
+            coro.close()
+            return None
+
+        monkeypatch.setattr(main, "sc_evm_engine", fake_engine)
+        monkeypatch.setattr(main, "get_orchestrator", fake_get_orchestrator)
+        monkeypatch.setattr(main, "run_orchestrator", fake_run_orchestrator)
+        monkeypatch.setattr(main, "get_indexed_documents", no_documents)
+        monkeypatch.setattr(main, "embed_text", fake_embed_text)
+        monkeypatch.setattr(main, "create_tracked_task", discard_indexing)
+
+        session_id = "query-degraded"
+        events = "".join([chunk async for chunk in main.sse_query_generator(session_id, "hello")])
+
+        assert "event: degradation" in events
+        assert "model_2_synthesis_failed" in events
         await main.session_registry.flush_session(session_id)
 
     asyncio.run(asyncio.wait_for(exercise(), timeout=10))

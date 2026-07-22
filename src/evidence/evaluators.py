@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
 from .models import FailureRecord, GroundTruth
 
@@ -10,15 +10,6 @@ from .models import FailureRecord, GroundTruth
 def blind_label(strategy_id: str, seed: int) -> str:
     value = hashlib.sha256(f"{strategy_id}:{seed}".encode()).hexdigest()[:10]
     return f"strategy-{value}"
-
-
-class Judge(Protocol):
-    evaluator_id: str
-    version: str
-
-    def evaluate(
-        self, *, prompt: str, completion: str, ground_truth: GroundTruth
-    ) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -90,21 +81,6 @@ class HumanEvaluatorPlaceholder:
             "status": "pending",
             "adjudication": ground_truth.adjudication,
         }
-
-
-@dataclass(frozen=True)
-class LLMJudge:
-    judge: Judge
-    evaluator_id: str = "llm-judge"
-    version: str = "1.0.0"
-
-    def evaluate(
-        self, *, prompt: str, completion: str, ground_truth: GroundTruth
-    ) -> dict[str, Any]:
-        result = self.judge.evaluate(
-            prompt=prompt, completion=completion, ground_truth=ground_truth
-        )
-        return {**result, "type": "llm_judge", "trusted_as_sole_evaluator": False}
 
 
 def evaluate_all(

@@ -126,8 +126,10 @@ The live `/api/agent/query` path behaves as follows:
 13. The current orchestrator obtains two candidate responses and requests one structured synthesis response.
 14. Parsed remembered facts are deduplicated into session metadata.
 15. Proposed actions are checked against the configured development phase; blocked actions become `none`.
-16. The API emits the complete answer in one `response_content` SSE event,
-    followed by action, typed usage records, legacy usage estimates, and intent.
+16. The API emits the complete answer in one `response_content` SSE event. A
+    degraded candidate or synthesis path also emits an explicit `degradation`
+    event, followed by action, stage-labeled usage or failure records, legacy
+    usage estimates, and intent.
 17. The API appends user and assistant messages under the session lock and trims direct history to six messages.
 18. A tracked background task embeds and adds the completed interaction to the session collection.
 19. The stream emits `done`; failures emit an error event and are logged.
