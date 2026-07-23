@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
 
-from fastapi import FastAPI, HTTPException, Path
+from fastapi import Depends, FastAPI, HTTPException, Path, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -15,6 +15,12 @@ from src.agent import AgentOrchestrator
 from src.config import settings
 from src.memory import session_registry, warm_memory_runtime
 from src.sc_evm import SCEVMEngine
+from src.security import (
+    Principal,
+    SecurityHeadersMiddleware,
+    get_current_principal,
+    require_scope,
+)
 from src.services.error_handlers import GlobalExceptionHandler
 from src.services.model_connector import ModelConnector
 from src.services.prompt_manager import PromptManager
@@ -90,10 +96,11 @@ app = FastAPI(title="State-Cached Ephemeral Vector Memory (SC-EVM) Microservice"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=settings.AUTH_MODE == "disabled",
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.add_exception_handler(Exception, GlobalExceptionHandler.handle)
 
@@ -111,6 +118,7 @@ SessionId = Annotated[
     Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"),
 ]
 PromptText = Annotated[str, Field(min_length=1, max_length=100_000)]
+CurrentPrincipal = Annotated[Principal, Depends(get_current_principal)]
 
 
 class SessionInitRequest(BaseModel):
@@ -140,10 +148,14 @@ class StandardResponseEnvelope(BaseModel):
 
 
 @app.get("/api/session/list", response_model=StandardResponseEnvelope)
-async def list_sessions() -> StandardResponseEnvelope:
+async def list_sessions(principal: CurrentPrincipal) -> StandardResponseEnvelope:
     """Retrieves a list of all active session IDs."""
     try:
-        session_ids = session_registry.list_session_ids()
+        session_ids = session_registry.list_session_ids(
+            tenant_id=principal.tenant_id,
+            owner_subject=principal.subject,
+            include_tenant=principal.has_scope(settings.OPERATOR_SCOPE),
+        )
         return StandardResponseEnvelope(
             status="success", message="Sessions listed successfully", data=session_ids
         )
@@ -153,23 +165,41 @@ async def list_sessions() -> StandardResponseEnvelope:
 
 
 @app.post("/api/session/initialize", response_model=StandardResponseEnvelope)
-async def initialize_session(body: SessionInitRequest) -> StandardResponseEnvelope:
+async def initialize_session(
+    body: SessionInitRequest,
+    principal: CurrentPrincipal,
+) -> StandardResponseEnvelope:
     """Invokes the session_registry.initialize_session lifecycle logic."""
     try:
-        await session_registry.initialize_session(body.session_id)
+        await session_registry.initialize_session(
+            body.session_id,
+            tenant_id=principal.tenant_id,
+            owner_subject=principal.subject,
+        )
         return StandardResponseEnvelope(
             status="success", message=f"Session {body.session_id} initialized successfully"
         )
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail="Session not found") from e
     except Exception as e:
         logger.exception("Failed to initialize session", extra={"session_id": body.session_id})
         raise HTTPException(status_code=500, detail="Failed to initialize session") from e
 
 
 @app.post("/api/session/message", response_model=StandardResponseEnvelope)
-async def append_message(body: ChatMessageInput) -> StandardResponseEnvelope:
+async def append_message(
+    body: ChatMessageInput,
+    principal: CurrentPrincipal,
+) -> StandardResponseEnvelope:
     """Manually synchronizes conversational entries under session-specific sub-locks."""
     try:
-        await session_registry.append_message(body.session_id, body.role, body.content)
+        await session_registry.append_message(
+            body.session_id,
+            body.role,
+            body.content,
+            tenant_id=principal.tenant_id,
+            owner_subject=principal.subject,
+        )
         return StandardResponseEnvelope(
             status="success", message="Message successfully appended to session history"
         )
@@ -185,13 +215,26 @@ async def burn_session(
     session_id: Annotated[
         str, Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
     ],
+    principal: CurrentPrincipal,
 ) -> StandardResponseEnvelope:
     """Completely purges the volatile RAM footprint and ChromaDB collection for a session."""
     try:
-        await session_registry.flush_session(session_id)
+        flushed = await session_registry.flush_session(
+            session_id,
+            tenant_id=principal.tenant_id,
+            owner_subject=(
+                None if principal.has_scope(settings.OPERATOR_SCOPE) else principal.subject
+            ),
+        )
+        if not flushed:
+            raise HTTPException(status_code=404, detail="Session not found")
         return StandardResponseEnvelope(
             status="success", message=f"Session {session_id} successfully flushed from memory"
         )
+    except HTTPException:
+        raise
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail="Session not found") from e
     except Exception as e:
         logger.exception("Failed to flush session", extra={"session_id": session_id})
         raise HTTPException(status_code=500, detail="Failed to flush session") from e
@@ -200,10 +243,23 @@ async def burn_session(
 @app.post("/api/session/burn/{session_id}", status_code=204, response_class=Response)
 async def burn_sandbox_session(
     session_id: Annotated[str, Path()],
+    principal: CurrentPrincipal,
 ) -> Response:
     """Permanently destroy one session's filesystem sandbox."""
     try:
+        if settings.AUTH_MODE == "oidc":
+            record = await session_registry.get_session(
+                session_id,
+                tenant_id=principal.tenant_id,
+                owner_subject=(
+                    None if principal.has_scope(settings.OPERATOR_SCOPE) else principal.subject
+                ),
+            )
+            if record is None:
+                raise HTTPException(status_code=404, detail="Session not found")
         sandbox_fs.burn_session(session_id)
+    except HTTPException:
+        raise
     except sandbox_fs.SandboxViolation as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(status_code=204)
@@ -214,10 +270,15 @@ async def get_session_history(
     session_id: Annotated[
         str, Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
     ],
+    principal: CurrentPrincipal,
 ) -> StandardResponseEnvelope:
     """Retrieves conversation history for a specific session ID."""
     try:
-        record = await session_registry.get_session(session_id)
+        record = await session_registry.get_session(
+            session_id,
+            tenant_id=principal.tenant_id,
+            owner_subject=principal.subject,
+        )
         if not record:
             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
         return StandardResponseEnvelope(
@@ -235,10 +296,15 @@ async def get_session_memory(
     session_id: Annotated[
         str, Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
     ],
+    principal: CurrentPrincipal,
 ) -> StandardResponseEnvelope:
     """Retrieves index contents and metadata registry for a session."""
     try:
-        record = await session_registry.get_session(session_id)
+        record = await session_registry.get_session(
+            session_id,
+            tenant_id=principal.tenant_id,
+            owner_subject=principal.subject,
+        )
         if not record:
             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
@@ -275,10 +341,22 @@ async def get_session_memory(
 
 
 async def sse_query_generator(
-    session_id: str, prompt: str, graphify_enabled: bool = True, diagnostic_mode: bool = False
+    session_id: str,
+    prompt: str,
+    graphify_enabled: bool = True,
+    diagnostic_mode: bool = False,
+    *,
+    tenant_id: str | None = None,
+    owner_subject: str | None = None,
+    create_session: bool = True,
 ) -> AsyncIterator[str]:
     """Generates server-sent events for query reformulation, context retrieval, and response content streams."""
-    async with session_registry.session_operation(session_id, create=True) as record:
+    async with session_registry.session_operation(
+        session_id,
+        create=create_session,
+        tenant_id=tenant_id,
+        owner_subject=owner_subject,
+    ) as record:
         async for event in _sse_query_generator_locked(
             record,
             session_id,
@@ -519,11 +597,31 @@ async def _sse_query_generator_locked(
 
 
 @app.post("/api/agent/query")
-async def agent_query(body: ExecutionQueryRequest) -> StreamingResponse:
+async def agent_query(
+    body: ExecutionQueryRequest,
+    request: Request,
+    principal: CurrentPrincipal,
+) -> StreamingResponse:
     """Evaluates query routing, updates registers, and yields Server-Sent Events."""
+    if body.diagnostic_mode:
+        require_scope(request, principal, settings.DIAGNOSTIC_SCOPE)
+    try:
+        await session_registry.initialize_session(
+            body.session_id,
+            tenant_id=principal.tenant_id,
+            owner_subject=principal.subject,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
     return StreamingResponse(
         sse_query_generator(
-            body.session_id, body.prompt, body.graphify_enabled, body.diagnostic_mode
+            body.session_id,
+            body.prompt,
+            body.graphify_enabled,
+            body.diagnostic_mode,
+            tenant_id=principal.tenant_id,
+            owner_subject=principal.subject,
+            create_session=False,
         ),
         media_type="text/event-stream",
     )
@@ -570,10 +668,18 @@ def _apply_phase_gate(
 
 
 @app.post("/api/dual-llm/process")
-async def dual_llm_process(body: DualLLMRequest) -> StandardResponseEnvelope:
+async def dual_llm_process(
+    body: DualLLMRequest,
+    principal: CurrentPrincipal,
+) -> StandardResponseEnvelope:
     """Directly triggers the Dual-LLM Orchestrator reasoning pass."""
     try:
-        async with session_registry.session_operation(body.session_id, create=True) as record:
+        async with session_registry.session_operation(
+            body.session_id,
+            create=True,
+            tenant_id=principal.tenant_id,
+            owner_subject=principal.subject,
+        ) as record:
             memory_snapshot = build_memory_snapshot(record)
             orchestrator = await get_orchestrator()
             result = await run_orchestrator(orchestrator, memory_snapshot, body.prompt)
@@ -601,6 +707,8 @@ async def dual_llm_process(body: DualLLMRequest) -> StandardResponseEnvelope:
                     "action": action_payload,
                 },
             )
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail="Session not found") from e
     except Exception as e:
         logger.exception("Dual-LLM processing failed", extra={"session_id": body.session_id})
         raise HTTPException(status_code=500, detail="Dual-LLM processing failed") from e

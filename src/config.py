@@ -1,5 +1,7 @@
 import os
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -68,6 +70,19 @@ class Settings(BaseSettings):
     TELEMETRY_MAX_FILE_SIZE_BYTES: int = Field(default=10 * 1024 * 1024, ge=1024)
     DIAGNOSTIC_MODE: bool = False
 
+    # Authentication and deployment boundary
+    DEPLOYMENT_MODE: Literal["development", "production"] = "development"
+    AUTH_MODE: Literal["disabled", "oidc"] = "disabled"
+    OIDC_ISSUER: str = ""
+    OIDC_AUDIENCE: str = ""
+    OIDC_JWKS_URL: str = ""
+    OIDC_JWT_ALGORITHMS: tuple[str, ...] = ("RS256",)
+    OIDC_CLOCK_SKEW_SECONDS: int = Field(default=30, ge=0, le=300)
+    OIDC_JWKS_CACHE_SECONDS: int = Field(default=300, ge=30, le=86400)
+    OIDC_JWKS_MIN_REFRESH_SECONDS: int = Field(default=30, ge=1, le=3600)
+    DIAGNOSTIC_SCOPE: str = "scevm:diagnostic"
+    OPERATOR_SCOPE: str = "scevm:operator"
+
     # NVIDIA API Limits
     NVIDIA_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
     NVIDIA_MAX_RETRIES: int = Field(default=3, ge=0, le=10)
@@ -118,6 +133,46 @@ class Settings(BaseSettings):
                 "RETRIEVAL_ABSOLUTE_DISTANCE_FLOOR cannot exceed "
                 "RETRIEVAL_ABSOLUTE_DISTANCE_CEILING"
             )
+        if self.DEPLOYMENT_MODE == "production":
+            if self.AUTH_MODE != "oidc":
+                raise ValueError("Production deployment requires AUTH_MODE=oidc")
+            required_oidc = {
+                "OIDC_ISSUER": self.OIDC_ISSUER,
+                "OIDC_AUDIENCE": self.OIDC_AUDIENCE,
+                "OIDC_JWKS_URL": self.OIDC_JWKS_URL,
+            }
+            missing = sorted(name for name, value in required_oidc.items() if not value.strip())
+            if missing:
+                raise ValueError(f"Production OIDC settings missing: {', '.join(missing)}")
+            for name in ("OIDC_ISSUER", "OIDC_JWKS_URL"):
+                parsed = urlparse(required_oidc[name])
+                if parsed.scheme != "https" or not parsed.netloc:
+                    raise ValueError(f"Production {name} must be an absolute HTTPS URL")
+            allowed_algorithms = {
+                "RS256",
+                "RS384",
+                "RS512",
+                "PS256",
+                "PS384",
+                "PS512",
+                "ES256",
+                "ES384",
+                "ES512",
+            }
+            unsupported = sorted(set(self.OIDC_JWT_ALGORITHMS) - allowed_algorithms)
+            if unsupported:
+                raise ValueError(f"Unsafe or unsupported production JWT algorithms: {unsupported}")
+            unsafe_origins = [
+                origin
+                for origin in self.CORS_ORIGINS
+                if origin == "*"
+                or urlparse(origin).scheme != "https"
+                or not urlparse(origin).netloc
+            ]
+            if not self.CORS_ORIGINS or unsafe_origins:
+                raise ValueError("Production CORS_ORIGINS must contain explicit HTTPS origins")
+            if self.DIAGNOSTIC_MODE:
+                raise ValueError("Production DIAGNOSTIC_MODE must be disabled")
         return self
 
 

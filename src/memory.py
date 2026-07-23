@@ -340,8 +340,16 @@ class SessionRecord:
     Encapsulates memory-confined storage configurations.
     """
 
-    def __init__(self, session_id: str):
+    def __init__(
+        self,
+        session_id: str,
+        *,
+        tenant_id: str = "development",
+        owner_subject: str = "development",
+    ):
         self.session_id: str = session_id
+        self.tenant_id: str = tenant_id
+        self.owner_subject: str = owner_subject
         self.last_accessed: float = time.time()
         self.chat_history: ManifestedHistory = ManifestedHistory(self.refresh_manifest)
         self.state_manifest: StateManifest = StateManifest.from_history(
@@ -433,9 +441,22 @@ class MultiTenantSessionRegistry:
             self._locks[session_id] = lock
         return lock
 
-    def list_session_ids(self) -> list[str]:
-        """Returns the current session identifiers in insertion order."""
-        return list(self._sessions.keys())
+    def list_session_ids(
+        self,
+        *,
+        tenant_id: str | None = None,
+        owner_subject: str | None = None,
+        include_tenant: bool = False,
+    ) -> list[str]:
+        """Return sessions visible to an owner or tenant-scoped operator."""
+        if tenant_id is None:
+            return list(self._sessions.keys())
+        return [
+            session_id
+            for session_id, session in self._sessions.items()
+            if session.tenant_id == tenant_id
+            and (include_tenant or session.owner_subject == owner_subject)
+        ]
 
     def _touch_session(self, session: SessionRecord) -> SessionRecord:
         session.last_accessed = time.time()
@@ -444,8 +465,29 @@ class MultiTenantSessionRegistry:
     def _get_session_unlocked(self, session_id: str) -> SessionRecord | None:
         return self._sessions.get(session_id)
 
+    @staticmethod
+    def _assert_owner(
+        session: SessionRecord,
+        *,
+        tenant_id: str | None,
+        owner_subject: str | None,
+    ) -> None:
+        if tenant_id is None and owner_subject is None:
+            return
+        if session.tenant_id != tenant_id:
+            raise KeyError(f"Session state context uninitialized: {session.session_id}")
+        if owner_subject is not None and session.owner_subject != owner_subject:
+            raise KeyError(f"Session state context uninitialized: {session.session_id}")
+
     @asynccontextmanager
-    async def _session_scope(self, session_id: str, *, create: bool = False):
+    async def _session_scope(
+        self,
+        session_id: str,
+        *,
+        create: bool = False,
+        tenant_id: str | None = None,
+        owner_subject: str | None = None,
+    ):
         lock = self.get_session_lock(session_id)
         async with lock:
             session = self._get_session_unlocked(session_id)
@@ -453,44 +495,98 @@ class MultiTenantSessionRegistry:
                 if not create:
                     raise KeyError(f"Session state context uninitialized: {session_id}")
                 await self._evict_capacity_pressure(exclude_session_id=session_id)
-                session = SessionRecord(session_id)
+                session = SessionRecord(
+                    session_id,
+                    tenant_id=tenant_id or "development",
+                    owner_subject=owner_subject or "development",
+                )
                 self._sessions[session_id] = session
 
+            self._assert_owner(
+                session,
+                tenant_id=tenant_id,
+                owner_subject=owner_subject,
+            )
             session = self._touch_session(session)
             self._guard_session_state(session)
             yield session
 
-    async def initialize_session(self, session_id: str) -> SessionRecord:
+    async def initialize_session(
+        self,
+        session_id: str,
+        *,
+        tenant_id: str | None = None,
+        owner_subject: str | None = None,
+    ) -> SessionRecord:
         """
         Dynamically initializes an isolated, memory-confined session profile for a user.
         Uses exclusive write lock.
         """
-        async with self._session_scope(session_id, create=True) as session:
+        async with self._session_scope(
+            session_id,
+            create=True,
+            tenant_id=tenant_id,
+            owner_subject=owner_subject,
+        ) as session:
             return session
 
     @asynccontextmanager
-    async def session_operation(self, session_id: str, *, create: bool = False):
+    async def session_operation(
+        self,
+        session_id: str,
+        *,
+        create: bool = False,
+        tenant_id: str | None = None,
+        owner_subject: str | None = None,
+    ):
         """Hold a session's lifecycle lock for one complete logical operation."""
-        async with self._session_scope(session_id, create=create) as session:
+        async with self._session_scope(
+            session_id,
+            create=create,
+            tenant_id=tenant_id,
+            owner_subject=owner_subject,
+        ) as session:
             yield session
 
-    async def get_session(self, session_id: str) -> SessionRecord | None:
+    async def get_session(
+        self,
+        session_id: str,
+        *,
+        tenant_id: str | None = None,
+        owner_subject: str | None = None,
+    ) -> SessionRecord | None:
         """
         Fetches an existing session profile without forcing side-effect mutations.
         Uses exclusive lock to ensure safe read.
         """
         try:
-            async with self._session_scope(session_id) as session:
+            async with self._session_scope(
+                session_id,
+                tenant_id=tenant_id,
+                owner_subject=owner_subject,
+            ) as session:
                 return session
         except KeyError:
             return None
 
-    async def append_message(self, session_id: str, role: str, content: str) -> None:
+    async def append_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        *,
+        tenant_id: str | None = None,
+        owner_subject: str | None = None,
+    ) -> None:
         """
         Appends a verified conversation log directly to the tenant's history buffer.
         Uses exclusive write lock.
         """
-        async with self._session_scope(session_id) as session:
+        async with self._session_scope(
+            session_id,
+            tenant_id=tenant_id,
+            owner_subject=owner_subject,
+        ) as session:
             session.chat_history.append({"role": role, "content": content})
             while len(session.chat_history) > settings.MAX_HISTORY_TURNS:
                 session.chat_history.pop(0)
@@ -498,7 +594,13 @@ class MultiTenantSessionRegistry:
             # Log to immutable telemetry sink
             log_interaction(session_id, role, content)
 
-    async def flush_session(self, session_id: str) -> bool:
+    async def flush_session(
+        self,
+        session_id: str,
+        *,
+        tenant_id: str | None = None,
+        owner_subject: str | None = None,
+    ) -> bool:
         """
         Removes application access to the isolated session record and deletes
         its ephemeral collection. This does not guarantee physical RAM erasure.
@@ -506,9 +608,15 @@ class MultiTenantSessionRegistry:
         """
         lock = self.get_session_lock(session_id)
         async with lock:
-            session = self._sessions.pop(session_id, None)
+            session = self._sessions.get(session_id)
             if not session:
                 return False
+            self._assert_owner(
+                session,
+                tenant_id=tenant_id,
+                owner_subject=owner_subject,
+            )
+            self._sessions.pop(session_id)
 
             try:
                 session.chroma_client.delete_collection(f"session_{session_id}")
