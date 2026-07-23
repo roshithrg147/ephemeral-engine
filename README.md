@@ -29,7 +29,7 @@ SC-EVM solves this by replacing linear append-only history with a bounded active
 - **NVIDIA NIM Support:** Integrates with the NVIDIA NIM API for LLM completions.
 
 ### What can it not do?
-- **No Production Multi-Tenant Auth:** All API endpoints are unauthenticated. SC-EVM does not include authorization middleware.
+- **No Shared Multi-Replica Sessions:** Authenticated ownership is enforced in production mode, but active sessions remain process-local.
 - **No Physical Memory Sanitization:** Session burn purges logical collections and registry mappings but does not sanitize the physical server RAM.
 - **No Provider Independence:** The LLM transport is currently implemented only for the NVIDIA NIM completions API.
 
@@ -43,6 +43,16 @@ SC-EVM solves this by replacing linear append-only history with a bounded active
    ```bash
    uv run assistant
    ```
+
+### How is production authentication configured?
+
+Production mode uses OIDC bearer JWTs. Configure `DEPLOYMENT_MODE=production`,
+`AUTH_MODE=oidc`, issuer, audience, JWKS URL, and explicit HTTPS CORS origins. Startup fails when
+required identity settings are absent or unsafe. Session IDs identify state but never authorize it;
+each active session is bound to verified `tenant_id` and `sub` claims.
+
+Development defaults keep authentication disabled for existing localhost workflows. Do not expose
+development mode to untrusted networks.
 
 ### How do I test it?
 Run the pytest test suite:
@@ -62,7 +72,7 @@ See [Final Statistical Report](evaluation/final/FINAL_STATISTICAL_REPORT.md) tog
 We do **NOT** claim that SC-EVM is:
 - **Production-ready** or **Enterprise-grade**.
 - **Provider-independent** (requires NVIDIA NIM).
-- **Leakage-proof** (auth must be implemented at the gateway).
+- **Leakage-proof** (authentication and logical isolation reduce risk but cannot prove zero leakage).
 
 ### How can I provide feedback?
 Please see [Feedback and Triage](docs/FEEDBACK_AND_TRIAGE.md) for how to submit bug reports, feature requests, or reproduction results.
