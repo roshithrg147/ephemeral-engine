@@ -1,6 +1,6 @@
 # RFC-0005: Security and Session Ownership
 
-- **Status:** Draft
+- **Status:** Accepted
 - **Author:** Architecture and Security
 - **Created:** 2026-07-23
 - **Reviewers:** Product, Architecture, Security, Operations
@@ -39,7 +39,7 @@ SC-EVM to enterprise-grade, multi-region, multi-replica, or compliance-certified
 IDs remain identifiers, never credentials. Logical burn remains distinct from physical erasure.
 Durable conversation storage remains outside this decision.
 
-## Current State
+## Baseline at Proposal
 
 - API endpoints have no authentication middleware.
 - Client supplies session ID and query can create that session implicitly.
@@ -173,7 +173,9 @@ option.
 
 ## Decision
 
-Undecided while Draft. Required review: Product, Architecture, Security, and Operations.
+Accepted on 2026-07-23. Initial implementation must preserve development compatibility while
+making production mode fail closed. Public deployment remains blocked until CI, threat review,
+operational readiness, and remaining gap-register gates pass.
 
 ## Evidence
 
@@ -182,4 +184,8 @@ Undecided while Draft. Required review: Product, Architecture, Security, and Ope
 - [Security and trust-boundary ADR](../architecture/ADR-0005-security-and-trust-boundaries.md)
 - [Product Manifesto](../MANIFESTO.md)
 - [Product Boundary](../PRODUCT_BOUNDARY.md)
-- Current API, session registry, telemetry, and security evidence tests
+- [`src/security.py`](../src/security.py)
+- [`src/config.py`](../src/config.py)
+- [`src/main.py`](../src/main.py)
+- [`src/memory.py`](../src/memory.py)
+- [`src/tests/test_security_auth.py`](../src/tests/test_security_auth.py)
