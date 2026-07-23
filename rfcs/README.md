@@ -58,6 +58,10 @@ The following topics reserve the expected sequence but are not decisions and do 
 
 - RFC-0004 — Provider Abstraction
 
+## Draft proposals
+
+- [RFC-0005 — Security and Session Ownership](RFC-0005-security-and-session-ownership.md)
+
 ## Accepted decisions
 
 - [RFC-0001 — Product Boundary](RFC-0001-product-boundary.md)
