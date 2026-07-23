@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from src.clients import IncompleteModelResponseError, NVIDIA_NIM_Client
+from src.clients import IncompleteModelResponseError, NVIDIA_NIM_Client, get_model_price
 from src.config import settings
 
 
@@ -24,10 +24,7 @@ def test_model_1_payload_uses_configured_nvidia_route(
     assert payload["model"] == settings.MODEL_1_FLASH
     assert payload["temperature"] == settings.MODEL_1_TEMPERATURE
     assert payload["top_p"] == settings.MODEL_1_TOP_P
-    if settings.MODEL_1_FLASH.lower().startswith("qwen/"):
-        assert payload["chat_template_kwargs"] == {"enable_thinking": False}
-    else:
-        assert "chat_template_kwargs" not in payload
+    assert "chat_template_kwargs" not in payload
 
 
 def test_model_2_payload_uses_configured_nvidia_route(
@@ -45,41 +42,43 @@ def test_model_2_payload_uses_configured_nvidia_route(
     assert payload["model"] == settings.MODEL_2_CORE
     assert payload["temperature"] == settings.MODEL_2_TEMPERATURE
     assert payload["top_p"] == settings.MODEL_2_TOP_P
-    if settings.MODEL_2_CORE.lower().startswith("qwen/"):
-        assert payload["chat_template_kwargs"] == {"enable_thinking": False}
-    else:
-        assert "chat_template_kwargs" not in payload
+    assert "chat_template_kwargs" not in payload
     assert "thinking" not in payload
 
 
-@pytest.mark.parametrize("model_key", ["gpt_oss", "gpt-oss", "openai", "kiwi", "model_2"])
-def test_model_2_aliases_resolve_to_configured_nvidia_route(
+@pytest.mark.parametrize("model_key", [settings.MODEL_2_KEY, settings.MODEL_2_CORE])
+def test_model_2_identifiers_resolve_to_configured_nvidia_route(
     monkeypatch: pytest.MonkeyPatch,
     model_key: str,
 ) -> None:
     monkeypatch.setattr(settings, "NVIDIA_API_KEY", "test-key")
-    monkeypatch.setattr(settings, "NVIDIA_API_KEY_KIWI", "model-2-key")
 
     model_name, temperature, top_p, api_key = NVIDIA_NIM_Client()._map_model(model_key)
 
     assert model_name == settings.MODEL_2_CORE
     assert temperature == settings.MODEL_2_TEMPERATURE
     assert top_p == settings.MODEL_2_TOP_P
-    assert api_key == "model-2-key"
+    assert api_key == "test-key"
 
 
-def test_model_2_route_falls_back_to_general_nvidia_key(
+def test_model_2_route_uses_shared_nvidia_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "NVIDIA_API_KEY", "general-key")
-    monkeypatch.setattr(settings, "NVIDIA_API_KEY_KIWI", "")
 
     _, _, _, api_key = NVIDIA_NIM_Client()._map_model(settings.MODEL_2_KEY)
 
     assert api_key == "general-key"
 
 
-def test_unknown_model_alias_is_rejected() -> None:
+def test_logical_core_role_uses_model_2_pricing() -> None:
+    assert get_model_price(settings.MODEL_2_KEY) == {
+        "input_1k": settings.MODEL_2_INPUT_PRICE_PER_1K,
+        "output_1k": settings.MODEL_2_OUTPUT_PRICE_PER_1K,
+    }
+
+
+def test_unknown_model_identifier_is_rejected() -> None:
     with pytest.raises(ValueError, match="Unknown NVIDIA NIM model key"):
         NVIDIA_NIM_Client()._map_model("unregistered-provider-model")
 

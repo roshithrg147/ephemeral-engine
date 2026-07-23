@@ -194,7 +194,6 @@ summary-notes-skill-gitrepo.md
 src/tests/*_result.txt
 src/tests/*_result.json
 src/tests/*.png
-src/tests/gemini-code-*.txt
 src/tests/results/
 *.log
 sc_evm_validation_report.json

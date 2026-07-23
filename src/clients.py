@@ -51,8 +51,8 @@ def get_model_price(model_name: str) -> dict[str, float]:
     """Return configured pricing for a physical model ID or logical role alias."""
     normalized = model_name.strip().lower()
     model_2_names = {
+        settings.MODEL_2_KEY.lower(),
         settings.MODEL_2_CORE.lower(),
-        *(alias.lower() for alias in settings.MODEL_2_ALIASES),
     }
     if normalized in model_2_names:
         return {
@@ -136,24 +136,22 @@ class NVIDIA_NIM_Client:
         model_1_keys = {
             settings.MODEL_1_KEY.lower(),
             settings.MODEL_1_FLASH.lower(),
-            *(alias.lower() for alias in settings.MODEL_1_ALIASES),
         }
         model_2_keys = {
             settings.MODEL_2_KEY.lower(),
             settings.MODEL_2_CORE.lower(),
-            *(alias.lower() for alias in settings.MODEL_2_ALIASES),
         }
 
         if normalized_key in model_1_keys:
             model_name = settings.MODEL_1_FLASH
             temp = settings.MODEL_1_TEMPERATURE
             top_p = settings.MODEL_1_TOP_P
-            api_key = settings.NVIDIA_API_KEY_QWEN or settings.NVIDIA_API_KEY
+            api_key = settings.NVIDIA_API_KEY
         elif normalized_key in model_2_keys:
             model_name = settings.MODEL_2_CORE
             temp = settings.MODEL_2_TEMPERATURE
             top_p = settings.MODEL_2_TOP_P
-            api_key = settings.NVIDIA_API_KEY_KIWI or settings.NVIDIA_API_KEY
+            api_key = settings.NVIDIA_API_KEY
         else:
             supported = sorted(model_1_keys | model_2_keys)
             raise ValueError(
@@ -200,9 +198,6 @@ class NVIDIA_NIM_Client:
         }
         if seed is not None:
             payload["seed"] = seed
-        model_lower = model_name.strip().lower()
-        if model_lower.startswith("qwen/"):
-            payload["chat_template_kwargs"] = {"enable_thinking": False}
         return payload
 
     def _request_parts(

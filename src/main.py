@@ -72,8 +72,7 @@ async def get_orchestrator() -> AgentOrchestrator:
 async def lifespan(app: FastAPI):
     """Lifespan event manager for startup diagnostics and graceful shutdown."""
     logger.info("Verifying local NVIDIA API key configuration...")
-    key = settings.NVIDIA_API_KEY or settings.NVIDIA_API_KEY_KIWI or settings.NVIDIA_API_KEY_QWEN
-    if key:
+    if settings.NVIDIA_API_KEY:
         logger.info("Local NVIDIA connection verification: SUCCESSFUL.")
     else:
         logger.warning("Local NVIDIA connection verification: FAILED (API Key missing).")
@@ -123,6 +122,7 @@ CurrentPrincipal = Annotated[Principal, Depends(get_current_principal)]
 
 class SessionInitRequest(BaseModel):
     session_id: SessionId
+    development_phase: int | None = Field(default=None, ge=0, le=3)
 
 
 class ChatMessageInput(BaseModel):
@@ -171,13 +171,21 @@ async def initialize_session(
 ) -> StandardResponseEnvelope:
     """Invokes the session_registry.initialize_session lifecycle logic."""
     try:
-        await session_registry.initialize_session(
+        record = await session_registry.initialize_session(
             body.session_id,
             tenant_id=principal.tenant_id,
             owner_subject=principal.subject,
         )
+        if body.development_phase is not None:
+            record.metadata_registry["development_phase"] = body.development_phase
         return StandardResponseEnvelope(
-            status="success", message=f"Session {body.session_id} initialized successfully"
+            status="success",
+            message=f"Session {body.session_id} initialized successfully",
+            data={
+                "development_phase": record.metadata_registry.get(
+                    "development_phase", settings.DEVELOPMENT_PHASE
+                )
+            },
         )
     except KeyError as e:
         raise HTTPException(status_code=404, detail="Session not found") from e
@@ -643,6 +651,8 @@ def _build_action_payload(action: Any) -> dict[str, Any] | None:
             "prompt": action.payload.prompt,
             "file_path": action.payload.file_path,
             "file_content": action.payload.file_content,
+            "glob": action.payload.glob,
+            "max_results": action.payload.max_results,
         }
 
     return {

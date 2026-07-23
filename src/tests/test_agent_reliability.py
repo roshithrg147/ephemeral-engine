@@ -1,6 +1,6 @@
 import json
 
-from src.agent import AgentOrchestrator, MemorySnapshot
+from src.agent import AgentOrchestrator, MemorySnapshot, RefinedResponse
 from src.clients import NIMResponse
 from src.config import settings
 
@@ -100,3 +100,41 @@ def test_successful_model_2_synthesis_records_all_stages(monkeypatch) -> None:
     assert all(record["measurement_type"] == "exact" for record in result.usage_records or [])
     assert [record["latency_seconds"] for record in result.usage_records or []] == [0.9, 0.8, 1.2]
     assert all(record["finish_reason"] == "stop" for record in result.usage_records or [])
+
+
+def test_provider_action_shape_drift_is_normalized() -> None:
+    result = RefinedResponse.model_validate(
+        {
+            "text": "Created probe",
+            "intent": "file",
+            "action": {
+                "action": "save_file",
+                "file_path": "probe.txt",
+                "file_content": "probe",
+            },
+            "remember": [],
+        }
+    )
+
+    assert result.action.type == "save_file"
+    assert result.action.payload is not None
+    assert result.action.payload.file_path == "probe.txt"
+    assert result.action.payload.file_content == "probe"
+
+
+def test_read_file_action_shape_is_preserved() -> None:
+    result = RefinedResponse.model_validate(
+        {
+            "text": "Inspecting project entry point",
+            "intent": "file",
+            "action": {
+                "type": "read_file",
+                "payload": {"file_path": "src/main.ts"},
+            },
+            "remember": [],
+        }
+    )
+
+    assert result.action.type == "read_file"
+    assert result.action.payload is not None
+    assert result.action.payload.file_path == "src/main.ts"

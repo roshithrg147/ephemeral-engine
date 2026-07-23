@@ -13,6 +13,9 @@ You must return your output strictly as a valid raw JSON object with two keys: "
 {lt_context}
 Provide clear, helpful, and technically accurate responses. Keep terminal context in mind.
 
+WORKSPACE EVIDENCE RULE:
+A file inventory proves only that paths exist. Never infer dependencies, architecture, implementation state, or file contents from names alone. When exact evidence is missing, request list_files or read_file through the structured action. Never ask the user to run commands or paste output.
+
 CRITICAL PHASE GATING RULE (Architect-First):
 If the user requests code generation for UI, frontend, or feature components, you must verify if the "database foundation" or backend schema has been established. If the database foundation is NOT established in the context, you MUST REFUSE the request. You must state that you cannot proceed with UI/feature code until the database foundation is built."""
 
@@ -26,12 +29,17 @@ Your task is to:
 2. Produce a single refined response in the `text` field. It should combine the strengths of both (reasoning/eloquence, structured details) and resolve any conflicts. Keep it friendly and concise.
 3. Determine the user's `intent` (chat, command, image_generation, file, help, exit).
 4. Decide if the query requires an automated `action` on the user's system:
-   - 'run_command': if the user wants to execute a terminal/shell command. Put the command in action.payload.command.
-   - 'generate_image': if the user wants to create/draw an image. Put the prompt in action.payload.prompt.
+   - 'list_files': when repository inventory is missing or more paths are needed. Optional action.payload.glob and action.payload.max_results.
+   - 'read_file': when exact workspace file contents are needed. Put one workspace-relative path in action.payload.file_path.
    - 'save_file': if the user wants to write a file. Put the path in action.payload.file_path and content in action.payload.file_content.
-   - 'update_memory': if the user wants to update their name or profile details.
    - 'none': if no action is needed.
+Never ask the user to run terminal commands or paste directory listings. Use list_files or read_file. Never request secrets, .env files, credentials, private keys, dependency vendor trees, or build output.
+File inventory proves only path existence. Never claim file contents, dependencies, architecture, or implementation state without supplied content. For repository reviews, use read_file until evidence supports the plan. Keep the final review concise.
 5. Extract any new facts about the user (e.g. name, preferences, project layout) to permanently remember in the `remember` list. Do NOT repeat facts already present in the User Profile Context or Learned Facts.
+
+REQUIRED OUTPUT SHAPE:
+{{"text":"user-facing response","intent":"file","action":{{"type":"read_file","payload":{{"file_path":"relative/path"}}}},"remember":[]}}
+The `action` value MUST be an object containing `type` and `payload`. Never place `file_path` or `file_content` beside `action`. Use {{"type":"none","payload":null}} when no action is required.
 
 CRITICAL PHASE GATING RULE (Architect-First):
 If the user requests code generation for UI, frontend, or feature components, you must verify if the "database foundation" or backend schema has been established in the context. If NOT, you MUST REFUSE the request and state that you cannot proceed with UI/feature code until the database foundation is built. Even if one of the models provided code, DO NOT output it.
@@ -97,4 +105,10 @@ If the user requests code generation for UI, frontend, or feature components, yo
 
     @classmethod
     def json_response_system_prompt(cls) -> str:
-        return "You must return your output strictly as a valid raw JSON object. Do not wrap it in markdown code blocks."
+        return (
+            "Return one valid raw JSON object with keys text, intent, action, and remember. "
+            "action must be an object with keys type and payload. "
+            "Allowed actions are list_files, read_file, save_file, and none. "
+            "Use read_file or list_files instead of asking the user for terminal output. "
+            "Do not wrap JSON in markdown code blocks."
+        )

@@ -44,6 +44,59 @@ SC-EVM solves this by replacing linear append-only history with a bounded active
    uv run assistant
    ```
 
+### How do I use the VS Code terminal bridge?
+
+Start the loopback gateway in one integrated terminal:
+
+```bash
+uv run uvicorn src.main:app --host 127.0.0.1 --port 8000
+```
+
+Then start the bridge in another terminal:
+
+```bash
+uv run scevm-vscode
+```
+
+Use `exit`, `quit`, Ctrl+C, or terminal EOF to stop. The bridge burns its session and verifies that
+history is no longer reachable before exiting. A bounded non-interactive smoke test is also
+available:
+
+```bash
+uv run scevm-vscode --prompt "Explain transaction atomicity in two sentences." --timeout 120
+```
+
+Set `SC_EVM_BEARER_TOKEN` when the gateway runs in OIDC mode. Run
+`uv run scevm-vscode --help` for session, graph, diagnostic, and shell-completion options. Proposed
+model actions are reported but never executed by this bridge.
+
+### How do I use the native VS Code chat extension?
+
+Start the gateway as above, then build and install the extension:
+
+```bash
+cd vscode-extension
+npm ci
+npm run package
+code --install-extension scevm-chat-0.3.0.vsix --force
+```
+
+Reload VS Code, run `SC-EVM: Open Chat` from the Command Palette, and send requests to `@scevm`.
+Explicit chat attachments are shared within the configured size limit; active-editor context requires
+one-time confirmation. Secret-bearing files are blocked and secret-like lines are redacted. Proposed
+file writes use a bounded agent loop. Default mode asks once per request, then applies safe structured
+workspace edits and reports each result back to SC-EVM. Degraded output, repeated edits, conflicts,
+unsupported actions, and loop limits stop execution. Set `scevm.executionMode` to `reviewEachEdit`
+for a diff and confirmation before every edit.
+
+Use `@scevm /diagnose`, `@scevm /status`, `@scevm /new`, or `@scevm /burn` for session lifecycle
+operations. Run `SC-EVM: Show Diagnostics` for gateway and SSE timing logs. If OIDC is
+enabled, run `SC-EVM: Set OIDC Bearer Token`; the token is stored in VS Code SecretStorage.
+
+Run `@scevm /review` to approve bounded repository inventory and core-manifest context. M2 may then
+use safe `list_files` and `read_file` actions inside the same agent loop. Secret files, vendor/build
+trees, binaries, oversized files, traversal, and symlinks remain blocked.
+
 ### How is production authentication configured?
 
 Production mode uses OIDC bearer JWTs. Configure `DEPLOYMENT_MODE=production`,

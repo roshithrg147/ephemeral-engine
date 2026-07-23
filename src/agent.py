@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.config import settings
 from src.services.model_connector import ModelConnector
@@ -34,14 +34,43 @@ class ActionPayload(BaseModel):
     prompt: str | None = Field(None, description="The prompt for image generation")
     file_path: str | None = Field(None, description="File path to save to")
     file_content: str | None = Field(None, description="File contents to write")
+    glob: str | None = Field(None, description="Workspace-relative file glob")
+    max_results: int | None = Field(None, ge=1, le=2000, description="Maximum listed files")
 
 
 class Action(BaseModel):
     type: str = Field(
         ...,
-        description="Action type: 'none', 'run_command', 'generate_image', 'save_file', 'update_memory'",
+        description="Action type: 'none', 'list_files', 'read_file', 'save_file', or unsupported external action",
     )
     payload: ActionPayload | None = Field(None, description="Arguments for the action")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_model_action(cls, value: Any) -> Any:
+        """Accept common provider shape drift without broadening executable action data."""
+        if isinstance(value, str):
+            return {"type": value, "payload": None}
+        if not isinstance(value, dict) or "type" in value:
+            return value
+        action_type = value.get("action") or value.get("action_type")
+        if not isinstance(action_type, str):
+            return value
+        payload = value.get("payload")
+        if not isinstance(payload, dict):
+            payload = {
+                key: value[key]
+                for key in (
+                    "command",
+                    "prompt",
+                    "file_path",
+                    "file_content",
+                    "glob",
+                    "max_results",
+                )
+                if key in value
+            }
+        return {"type": action_type, "payload": payload or None}
 
 
 class RefinedResponse(BaseModel):
@@ -58,6 +87,18 @@ class RefinedResponse(BaseModel):
     usage_records: list[dict[str, Any]] | None = None
     degraded: bool = False
     degradation_reasons: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_sibling_action_payload(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or not isinstance(value.get("action"), str):
+            return value
+        normalized = dict(value)
+        normalized["action"] = {
+            "type": value["action"],
+            "payload": value.get("payload"),
+        }
+        return normalized
 
 
 class AgentOrchestrator:
@@ -78,10 +119,7 @@ class AgentOrchestrator:
         """Verify that at least one NVIDIA API key is configured in the environment."""
         from src.config import settings
 
-        key = (
-            settings.NVIDIA_API_KEY or settings.NVIDIA_API_KEY_KIWI or settings.NVIDIA_API_KEY_QWEN
-        )
-        if not key:
+        if not settings.NVIDIA_API_KEY:
             raise RuntimeError(
                 "Authentication failed. Please configure NVIDIA_API_KEY in your environment."
             )

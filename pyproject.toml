@@ -34,6 +34,7 @@ dev = [
 [project.scripts]
 assistant = "src.cli:main"
 agy-scevm = "src.agy_scevm:main"
+scevm-vscode = "src.vscode_bridge:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

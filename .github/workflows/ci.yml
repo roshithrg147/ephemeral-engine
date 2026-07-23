@@ -56,12 +56,35 @@ jobs:
         env:
           CI: "true"
 
+  vscode-extension:
+    name: VS Code extension tests and package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode-extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run check
+      - name: Test
+        run: npm test
+      - name: Package
+        run: npm run package
+
   containers:
     name: Container builds
     runs-on: ubuntu-latest
     needs:
       - backend
       - dashboard
+      - vscode-extension
     steps:
       - uses: actions/checkout@v4
       - name: Validate Compose configuration

@@ -1,0 +1,161 @@
+{
+  "name": "scevm-chat",
+  "displayName": "SC-EVM Chat",
+  "description": "Route VS Code Chat through SC-EVM with approved context, diagnostics, and bounded workspace-edit loops.",
+  "version": "0.3.0",
+  "publisher": "roshithrg147",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/roshithrg147/ephemeral-engine.git"
+  },
+  "engines": {
+    "vscode": "^1.125.0"
+  },
+  "categories": [
+    "Chat",
+    "Machine Learning",
+    "Other"
+  ],
+  "activationEvents": [
+    "onChatParticipant:scevm.chat",
+    "onCommand:scevm.openChat",
+    "onCommand:scevm.setToken",
+    "onCommand:scevm.burnSession"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "scevm.openChat",
+        "title": "SC-EVM: Open Chat"
+      },
+      {
+        "command": "scevm.setToken",
+        "title": "SC-EVM: Set OIDC Bearer Token"
+      },
+      {
+        "command": "scevm.burnSession",
+        "title": "SC-EVM: Burn Current Session"
+      },
+      {
+        "command": "scevm.applyPendingEdit",
+        "title": "SC-EVM: Review and Apply Pending Edit"
+      },
+      {
+        "command": "scevm.showDiagnostics",
+        "title": "SC-EVM: Show Diagnostics"
+      }
+    ],
+    "chatParticipants": [
+      {
+        "id": "scevm.chat",
+        "name": "scevm",
+        "fullName": "SC-EVM",
+        "description": "Session-isolated development assistant backed by Nemotron and GPT-OSS.",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "status",
+            "description": "Check the local gateway and active session"
+          },
+          {
+            "name": "burn",
+            "description": "Burn the current SC-EVM session"
+          },
+          {
+            "name": "new",
+            "description": "Burn the current session and start a fresh one"
+          },
+          {
+            "name": "diagnose",
+            "description": "Verify gateway, pipeline, session, and execution settings"
+          },
+          {
+            "name": "review",
+            "description": "Inspect approved workspace files and produce an evidence-backed plan"
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "SC-EVM",
+      "properties": {
+        "scevm.gatewayUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000",
+          "description": "SC-EVM FastAPI gateway. Non-loopback URLs require explicit opt-in."
+        },
+        "scevm.allowRemoteGateway": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow sending prompts and approved context to a non-loopback gateway."
+        },
+        "scevm.contextPolicy": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "attachmentsOnly",
+            "none"
+          ],
+          "default": "prompt",
+          "description": "How active-editor context is shared. Chat attachments are always treated as explicitly approved."
+        },
+        "scevm.maxContextBytes": {
+          "type": "number",
+          "default": 65536,
+          "minimum": 1024,
+          "maximum": 262144,
+          "description": "Maximum total UTF-8 bytes sent as workspace context per request."
+        },
+        "scevm.requestTimeoutSeconds": {
+          "type": "number",
+          "default": 180,
+          "minimum": 5,
+          "maximum": 600,
+          "description": "Maximum duration for one streamed SC-EVM request."
+        },
+        "scevm.graphifyEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable gateway-local Graphify context only when its index matches the active VS Code workspace."
+        },
+        "scevm.executionMode": {
+          "type": "string",
+          "enum": [
+            "confirmThenAutoApply",
+            "reviewEachEdit"
+          ],
+          "default": "confirmThenAutoApply",
+          "description": "Confirm once per request and apply bounded workspace edits automatically, or review each edit separately."
+        },
+        "scevm.maxAgentIterations": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum M1 to M2 requests in one confirmed workspace-edit loop."
+        },
+        "scevm.developmentPhase": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 3,
+          "description": "Session phase gate: 0 initialization, 1 database design, 2 backend ready, 3 UI ready."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "check": "tsc -p . --noEmit",
+    "test": "npm run compile && node --test out/test/**/*.test.js",
+    "package": "npm run check && npm test && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/vscode": "^1.125.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^5.9.3"
+  }
+}

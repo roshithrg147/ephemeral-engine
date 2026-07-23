@@ -4,13 +4,9 @@ from pydantic import ValidationError
 from src.config import Settings
 
 
-def test_settings_reject_overlapping_model_aliases() -> None:
-    with pytest.raises(ValidationError, match="Model role aliases overlap"):
-        Settings(
-            _env_file=None,
-            MODEL_1_ALIASES=("shared",),
-            MODEL_2_ALIASES=("shared",),
-        )
+def test_settings_reject_alternate_model_routes() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, MODEL_1_FLASH="alternate/model")
 
 
 def test_settings_reject_invalid_distance_ordering() -> None:
