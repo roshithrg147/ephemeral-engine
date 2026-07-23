@@ -10,6 +10,14 @@ from src.services.prompt_manager import PromptManager
 from src.services.response_parsing import strip_code_fences
 
 
+class ProviderUsage(dict[str, Any]):
+    """Provider token usage with transport metadata kept outside the mapping contract."""
+
+    def __init__(self, values: dict[str, Any], provider_metadata: dict[str, Any]):
+        super().__init__(values)
+        self.provider_metadata = provider_metadata
+
+
 class SCEVMEngine:
     """Pure logic calculation engine for query reformulation and confidence gating calculations."""
 
@@ -41,7 +49,10 @@ class SCEVMEngine:
                 max_tokens=settings.MODEL_REFORMULATION_MAX_TOKENS,
             )
             text_clean = strip_code_fences(response_text)
-            usage = getattr(response_text, "usage", None)
+            usage = ProviderUsage(
+                dict(getattr(response_text, "usage", None) or {}),
+                dict(getattr(response_text, "provider_metadata", None) or {}),
+            )
 
             if not text_clean:
                 return current_input, current_input, usage

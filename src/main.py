@@ -430,7 +430,8 @@ async def _sse_query_generator_locked(
         from src.clients import get_model_price
 
         rewrite_record = []
-        if rewrite_usage:
+        rewrite_metadata = dict(getattr(rewrite_usage, "provider_metadata", None) or {})
+        if rewrite_usage and rewrite_usage.get("prompt_tokens") is not None:
             rewrite_record.append(
                 {
                     "measurement_type": "exact",
@@ -449,6 +450,9 @@ async def _sse_query_generator_locked(
                     * get_model_price(settings.MODEL_1_FLASH)["input_1k"]
                     + (rewrite_usage.get("completion_tokens", 0) / 1000.0)
                     * get_model_price(settings.MODEL_1_FLASH)["output_1k"],
+                    "latency_seconds": rewrite_metadata.get("latency_seconds"),
+                    "attempts": rewrite_metadata.get("attempts", []),
+                    "finish_reason": rewrite_metadata.get("finish_reason"),
                 }
             )
         else:
@@ -467,6 +471,9 @@ async def _sse_query_generator_locked(
                     "missing_reason": "exact usage not returned by provider",
                     "price_table_version": "v1.0",
                     "calculated_cost": None,
+                    "latency_seconds": rewrite_metadata.get("latency_seconds"),
+                    "attempts": rewrite_metadata.get("attempts", []),
+                    "finish_reason": rewrite_metadata.get("finish_reason"),
                 }
             )
 

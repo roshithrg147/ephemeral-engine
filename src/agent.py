@@ -299,9 +299,13 @@ class AgentOrchestrator:
                 "missing_reason": f"{stage} failed: {failure}",
                 "price_table_version": "v1.0",
                 "calculated_cost": None,
+                "latency_seconds": None,
+                "attempts": [],
+                "finish_reason": None,
             }
 
         usage = getattr(response, "usage", None)
+        provider_metadata = dict(getattr(response, "provider_metadata", None) or {})
         if usage:
             return {
                 "measurement_type": "exact",
@@ -320,6 +324,9 @@ class AgentOrchestrator:
                 * get_model_price(model)["input_1k"]
                 + (usage.get("completion_tokens", 0) / 1000.0)
                 * get_model_price(model)["output_1k"],
+                "latency_seconds": provider_metadata.get("latency_seconds"),
+                "attempts": provider_metadata.get("attempts", []),
+                "finish_reason": provider_metadata.get("finish_reason"),
             }
 
         return {
@@ -336,6 +343,9 @@ class AgentOrchestrator:
             "missing_reason": "exact usage not returned by provider",
             "price_table_version": "v1.0",
             "calculated_cost": None,
+            "latency_seconds": provider_metadata.get("latency_seconds"),
+            "attempts": provider_metadata.get("attempts", []),
+            "finish_reason": provider_metadata.get("finish_reason"),
         }
 
     def generate_image(self, prompt: str, filename: str = "images/output.png") -> str:
