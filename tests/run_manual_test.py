@@ -58,9 +58,7 @@ def is_provider_failure(value: Any) -> bool:
 
     if not isinstance(value, str):
         return False
-    return value.startswith("[DEGRADED:") or (
-        value.startswith("[Model ") and " failed:" in value
-    )
+    return value.startswith("[DEGRADED:") or (value.startswith("[Model ") and " failed:" in value)
 
 
 async def verify_gateway(client: httpx.AsyncClient) -> dict[str, Any]:
