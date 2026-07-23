@@ -16,6 +16,7 @@ class RewriteConnector:
         return NIMResponse(
             '{"search_vector_query":"stable query","grounded_llm_prompt":"grounded prompt"}',
             {"prompt_tokens": 4, "completion_tokens": 7},
+            {"latency_seconds": 0.4, "finish_reason": "stop", "attempts": []},
         )
 
 
@@ -30,6 +31,7 @@ def test_reformulation_preserves_provider_usage():
     assert search_query == "stable query"
     assert grounded_prompt == "grounded prompt"
     assert usage == {"prompt_tokens": 4, "completion_tokens": 7}
+    assert usage.provider_metadata["latency_seconds"] == 0.4
     assert connector.last_request["model_key"] == settings.MODEL_1_KEY
     assert connector.last_request["max_tokens"] == settings.MODEL_REFORMULATION_MAX_TOKENS
 

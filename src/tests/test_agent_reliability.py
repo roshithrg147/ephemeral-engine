@@ -24,6 +24,11 @@ class SuccessfulConnector:
             return NIMResponse(
                 "Model 1 candidate",
                 usage={"prompt_tokens": 8, "completion_tokens": 4},
+                provider_metadata={
+                    "latency_seconds": 0.8,
+                    "attempts": [{"attempt": 1, "status": 200, "seconds": 0.8}],
+                    "finish_reason": "stop",
+                },
             )
 
         self.model_2_calls += 1
@@ -31,6 +36,11 @@ class SuccessfulConnector:
             return NIMResponse(
                 "Model 2 candidate",
                 usage={"prompt_tokens": 9, "completion_tokens": 5},
+                provider_metadata={
+                    "latency_seconds": 0.9,
+                    "attempts": [{"attempt": 1, "status": 200, "seconds": 0.9}],
+                    "finish_reason": "stop",
+                },
             )
         return NIMResponse(
             json.dumps(
@@ -42,6 +52,11 @@ class SuccessfulConnector:
                 }
             ),
             usage={"prompt_tokens": 20, "completion_tokens": 7},
+            provider_metadata={
+                "latency_seconds": 1.2,
+                "attempts": [{"attempt": 1, "status": 200, "seconds": 1.2}],
+                "finish_reason": "stop",
+            },
         )
 
 
@@ -83,3 +98,5 @@ def test_successful_model_2_synthesis_records_all_stages(monkeypatch) -> None:
         "model_2_synthesis",
     ]
     assert all(record["measurement_type"] == "exact" for record in result.usage_records or [])
+    assert [record["latency_seconds"] for record in result.usage_records or []] == [0.9, 0.8, 1.2]
+    assert all(record["finish_reason"] == "stop" for record in result.usage_records or [])
