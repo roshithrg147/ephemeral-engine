@@ -10,8 +10,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # API Keys
     NVIDIA_API_KEY: str = ""
-    NVIDIA_API_KEY_QWEN: str = ""
-    NVIDIA_API_KEY_KIWI: str = ""
 
     # API endpoints
     SC_EVM_BASE_URL: str = "http://127.0.0.1:8000"
@@ -19,19 +17,10 @@ class Settings(BaseSettings):
     NVIDIA_NIM_CHAT_COMPLETIONS_URL: str = "https://integrate.api.nvidia.com/v1/chat/completions"
 
     # NVIDIA NIM model registry
-    MODEL_1_KEY: str = "nemotron"
-    MODEL_2_KEY: str = "core"
-    MODEL_1_FLASH: str = "nvidia/nemotron-3-nano-30b-a3b"
-    MODEL_2_CORE: str = "openai/gpt-oss-120b"
-    MODEL_1_ALIASES: tuple[str, ...] = ("qwen", "model_1", "model1")
-    MODEL_2_ALIASES: tuple[str, ...] = (
-        "gpt_oss",
-        "gpt-oss",
-        "openai",
-        "kiwi",
-        "model_2",
-        "model2",
-    )
+    MODEL_1_KEY: Literal["nemotron"] = "nemotron"
+    MODEL_2_KEY: Literal["gpt-oss"] = "gpt-oss"
+    MODEL_1_FLASH: Literal["nvidia/nemotron-3-nano-30b-a3b"] = "nvidia/nemotron-3-nano-30b-a3b"
+    MODEL_2_CORE: Literal["openai/gpt-oss-120b"] = "openai/gpt-oss-120b"
     MODEL_1_TEMPERATURE: float = Field(default=0.7, ge=0.0, le=2.0)
     MODEL_1_TOP_P: float = Field(default=0.8, ge=0.0, le=1.0)
     MODEL_2_TEMPERATURE: float = Field(default=1.0, ge=0.0, le=2.0)
@@ -40,9 +29,9 @@ class Settings(BaseSettings):
     MODEL_1_OUTPUT_PRICE_PER_1K: float = Field(default=0.0004, ge=0.0)
     MODEL_2_INPUT_PRICE_PER_1K: float = Field(default=0.0005, ge=0.0)
     MODEL_2_OUTPUT_PRICE_PER_1K: float = Field(default=0.0006, ge=0.0)
-    MODEL_CANDIDATE_MAX_TOKENS: int = Field(default=2048, ge=1, le=131_072)
+    MODEL_CANDIDATE_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
     MODEL_REFORMULATION_MAX_TOKENS: int = Field(default=1024, ge=1, le=131_072)
-    MODEL_SYNTHESIS_MAX_TOKENS: int = Field(default=1536, ge=1, le=131_072)
+    MODEL_SYNTHESIS_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
 
     # Network Security
     CORS_ORIGINS: list[str] = Field(
@@ -115,11 +104,6 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_routing_and_thresholds(self) -> "Settings":
         """Reject ambiguous model routing and invalid bounded-policy ordering."""
-        model_1_keys = {self.MODEL_1_KEY.lower(), *(key.lower() for key in self.MODEL_1_ALIASES)}
-        model_2_keys = {self.MODEL_2_KEY.lower(), *(key.lower() for key in self.MODEL_2_ALIASES)}
-        overlap = model_1_keys & model_2_keys
-        if overlap:
-            raise ValueError(f"Model role aliases overlap: {sorted(overlap)}")
         if self.NVIDIA_MAX_KEEPALIVE_CONNECTIONS > self.NVIDIA_MAX_CONNECTIONS:
             raise ValueError(
                 "NVIDIA_MAX_KEEPALIVE_CONNECTIONS cannot exceed NVIDIA_MAX_CONNECTIONS"

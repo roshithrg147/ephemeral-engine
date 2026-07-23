@@ -267,16 +267,13 @@ The repository currently has these values in an ignored `engine-dashboard/.env.d
 | Variable | Default | Required | Meaning |
 | --- | --- | --- | --- |
 | `NVIDIA_API_KEY` | empty | Yes for normal operation | Shared provider credential; preferred by both configured models |
-| `NVIDIA_API_KEY_QWEN` | empty | Conditional | Model-specific fallback credential |
-| `NVIDIA_API_KEY_KIWI` | empty | Conditional | Core-model-specific fallback credential |
 | `SC_EVM_BASE_URL` | `http://127.0.0.1:8000` | No | Canonical local API origin used by CLI, lifecycle, evidence, and benchmark clients |
 | `SC_EVM_SINGLE_MODEL_BASE_URL` | `http://127.0.0.1:8001` | No | Single-model benchmark API origin |
 | `NVIDIA_NIM_CHAT_COMPLETIONS_URL` | NVIDIA hosted chat-completions URL | No | Sole external inference endpoint |
 | `MODEL_1_KEY` | `nemotron` | No | Logical Model 1 role used for reformulation and the first candidate |
-| `MODEL_2_KEY` | `kiwi` | No | Logical Model 2 role used for the second candidate and synthesis |
+| `MODEL_2_KEY` | `gpt-oss` | No | Logical Model 2 role used for the second candidate and synthesis |
 | `MODEL_1_FLASH` | `nvidia/nemotron-3-nano-30b-a3b` | No | NVIDIA NIM physical model for Model 1 |
 | `MODEL_2_CORE` | `openai/gpt-oss-120b` | No | NVIDIA NIM physical model for Model 2 |
-| `MODEL_1_ALIASES` / `MODEL_2_ALIASES` | role-specific tuples | No | Exact accepted aliases for the configured NVIDIA model roles; `kiwi` remains a temporary compatibility alias for Model 2 |
 | `MODEL_CANDIDATE_MAX_TOKENS` | `2048` | No | Candidate response ceiling |
 | `MODEL_REFORMULATION_MAX_TOKENS` | `1024` | No | Reformulation and evidence-reasoner response ceiling |
 | `MODEL_SYNTHESIS_MAX_TOKENS` | `1536` | No | Structured synthesis response ceiling |

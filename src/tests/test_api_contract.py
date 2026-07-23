@@ -14,9 +14,16 @@ def test_session_lifecycle_and_validation():
 
             initialized = await client.post(
                 "/api/session/initialize",
-                json={"session_id": "api-contract"},
+                json={"session_id": "api-contract", "development_phase": 3},
             )
             assert initialized.status_code == 200
+            assert initialized.json()["data"]["development_phase"] == 3
+
+            invalid_phase = await client.post(
+                "/api/session/initialize",
+                json={"session_id": "api-invalid-phase", "development_phase": 4},
+            )
+            assert invalid_phase.status_code == 422
 
             invalid_role = await client.post(
                 "/api/session/message",

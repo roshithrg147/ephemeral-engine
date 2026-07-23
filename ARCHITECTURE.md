@@ -238,7 +238,7 @@ The canonical boundary is `ModelConnector`: callers supply a logical model key, 
 | Provider-native stream parsing | NVIDIA transport supports it | Implemented but unused by canonical API path |
 | Provider-neutral error/usage contract | Exceptions and text only; no normalized usage/error taxonomy | Partially Implemented |
 | Additional external provider adapters | None in current repository | Planned through reserved RFC-0004, not implemented |
-| Vertex AI/Google AI/Anthropic direct runtime | Removed; compatibility aliases resolve only to configured NVIDIA NIM routes | Unsupported |
+| Other direct model runtimes | Removed; only configured NVIDIA NIM routes are supported | Unsupported |
 
 Retries cover HTTP/network failures and selected retryable status codes with exponential backoff and optional `Retry-After`; configured maximum retries default to three. Connect, read, write, and pool timeouts are defined in the transport. Structured output is enforced by prompts and parsing rather than a provider-independent schema capability.
 

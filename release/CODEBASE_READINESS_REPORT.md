@@ -37,7 +37,7 @@ exists. Execution-dependent and policy-dependent work remains open or partial.
   physical model IDs, generation ceilings, pricing, and retrieval distance
   policy are centralized in `src/config.py`.
 - Runtime and live evidence inference use the unified `NVIDIA_NIM_Client`;
-  direct Vertex AI and Google AI code and dependencies are absent.
+  direct non-NVIDIA model code and dependencies are absent.
 - FastAPI lifespan explicitly cancels the TTL collector, awaits tracked
   background tasks, and closes the shared provider client.
 - Dashboard session count, latency, intent distribution, memory anchors, and
