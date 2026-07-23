@@ -27,6 +27,8 @@ jobs:
         run: uv sync --locked --dev
       - name: Ruff
         run: uv run ruff check src tests evaluation scripts
+      - name: Ruff format
+        run: uv run ruff format --check src tests evaluation scripts
       - name: Pytest
         run: uv run pytest -q
 
