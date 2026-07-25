@@ -644,8 +644,8 @@ class DualLLMRequest(BaseModel):
 
 
 class OpenAIChatCompletionMessage(BaseModel):
-    role: Literal["system", "user", "assistant", "tool"]
-    content: PromptText
+    role: str
+    content: str | list[Any] | dict[str, Any] | None = ""
 
 
 class OpenAIChatCompletionRequest(BaseModel):
@@ -683,16 +683,40 @@ def _infer_openai_session_id(body: OpenAIChatCompletionRequest, request: Request
     return "openai-anonymous"
 
 
+def _extract_message_content(content: str | list[Any] | dict[str, Any] | None) -> str:
+    if not content:
+        return ""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, str) and part.strip():
+                parts.append(part.strip())
+            elif isinstance(part, dict):
+                text_val = part.get("text") or part.get("content") or ""
+                if isinstance(text_val, str) and text_val.strip():
+                    parts.append(text_val.strip())
+        return "\n".join(parts)
+    if isinstance(content, dict):
+        text_val = content.get("text") or content.get("content") or ""
+        return text_val.strip() if isinstance(text_val, str) else ""
+    return str(content).strip()
+
+
 def _flatten_openai_messages(messages: list[OpenAIChatCompletionMessage]) -> str:
     system_parts: list[str] = []
     conversation_parts: list[str] = []
     for message in messages:
+        text = _extract_message_content(message.content)
+        if not text:
+            continue
         if message.role == "system":
-            system_parts.append(message.content)
+            system_parts.append(text)
         elif message.role == "assistant":
-            conversation_parts.append(f"Assistant: {message.content}")
+            conversation_parts.append(f"Assistant: {text}")
         else:
-            conversation_parts.append(message.content)
+            conversation_parts.append(text)
 
     prompt = "\n\n".join(system_parts + conversation_parts)
     return prompt.strip()
