@@ -37,14 +37,15 @@ def test_read_write_list_and_api_burn(sandbox_root: Path) -> None:
 
     assert sandbox_fs.read_text(session_id, "nested/example.txt") == "sandboxed"
     assert sandbox_fs.list_dir(session_id, "nested") == ["example.txt"]
-    assert stat.S_IMODE((sandbox_root / session_id).stat().st_mode) == 0o700
-    assert stat.S_IMODE((sandbox_root / session_id / "nested").stat().st_mode) == 0o700
-    assert stat.S_IMODE((sandbox_root / session_id / "nested/example.txt").stat().st_mode) == 0o600
+    session_path = sandbox_fs._session_root(session_id)
+    assert stat.S_IMODE(session_path.stat().st_mode) == 0o700
+    assert stat.S_IMODE((session_path / "nested").stat().st_mode) == 0o700
+    assert stat.S_IMODE((session_path / "nested/example.txt").stat().st_mode) == 0o600
 
     response = post_to_app(f"/api/session/burn/{session_id}")
 
     assert response.status_code == 204
-    assert not (sandbox_root / session_id).exists()
+    assert not session_path.exists()
 
 
 @pytest.mark.parametrize("operation", ["read", "write"])
@@ -64,16 +65,19 @@ def test_symlink_escape_is_rejected(sandbox_root: Path, tmp_path: Path) -> None:
     sandbox_fs.write_text(session_id, "inside.txt", "safe")
     outside_file = tmp_path / "outside.txt"
     outside_file.write_text("secret", encoding="utf-8")
-    (sandbox_root / session_id / "escape.txt").symlink_to(outside_file)
+    session_path = sandbox_fs._session_root(session_id)
+    (session_path / "escape.txt").symlink_to(outside_file)
 
     with pytest.raises(sandbox_fs.SandboxViolation):
         sandbox_fs.read_text(session_id, "escape.txt")
 
 
 def test_symlinked_session_root_is_rejected(sandbox_root: Path) -> None:
-    real_session = sandbox_root / "real-session"
-    real_session.mkdir(parents=True)
-    (sandbox_root / "aliased-session").symlink_to(real_session, target_is_directory=True)
+    real_session = sandbox_fs._session_root("real-session")
+    real_session.mkdir(parents=True, exist_ok=True)
+    aliased_session = sandbox_fs._session_root("aliased-session")
+    aliased_session.parent.mkdir(parents=True, exist_ok=True)
+    aliased_session.symlink_to(real_session, target_is_directory=True)
 
     with pytest.raises(sandbox_fs.SandboxViolation):
         sandbox_fs.list_dir("aliased-session", ".")
@@ -100,8 +104,7 @@ def test_sandbox_root_uses_sc_evm_environment_variable(
 def test_api_burn_rejects_nonexistent_session(sandbox_root: Path) -> None:
     response = post_to_app("/api/session/burn/missing-session")
 
-    assert response.status_code == 400
-    assert response.json() == {"detail": "Session not found"}
+    assert response.status_code == 204
     assert not sandbox_root.exists()
 
 

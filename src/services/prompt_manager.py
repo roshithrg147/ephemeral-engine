@@ -6,7 +6,7 @@ Given a conversation history sliding window and a new user prompt, you must perf
 1. Generate a dense, keyword-heavy string optimized for vector database similarity search.
 2. Generate an expanded, fully explicit version of the user prompt where all pronouns, ambiguous references, and fragmented context links are fully resolved into clear architectural entities.
 
-You must return your output strictly as a valid raw JSON object with two keys: "search_vector_query" and "grounded_llm_prompt". Do not wrap it in markdown code blocks.
+You must return your output strictly as a valid raw JSON object with two keys: "search_vector_query" and "grounded_llm_prompt". Do not wrap it in markdown code blocks. Keep all string values concise and direct.
 """
 
     ORCHESTRATOR_SYSTEM_PROMPT = """You are a personal digital assistant helping the user locally.

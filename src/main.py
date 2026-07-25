@@ -1,7 +1,10 @@
 import asyncio
 import concurrent.futures
+import hashlib
 import json
 import logging
+import re
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
@@ -638,6 +641,210 @@ async def agent_query(
 class DualLLMRequest(BaseModel):
     session_id: SessionId
     prompt: PromptText
+
+
+class OpenAIChatCompletionMessage(BaseModel):
+    role: Literal["system", "user", "assistant", "tool"]
+    content: PromptText
+
+
+class OpenAIChatCompletionRequest(BaseModel):
+    model: str
+    messages: list[OpenAIChatCompletionMessage] | None = None
+    prompt: PromptText | None = None
+    stream: bool = False
+    temperature: float | None = None
+    max_tokens: int | None = None
+    user: str | None = None
+    session_id: SessionId | None = None
+
+
+def _normalize_session_id(raw_session_id: str | None) -> SessionId:
+    if not raw_session_id:
+        return "openai-anonymous"
+    normalized = re.sub(r"[^A-Za-z0-9_.-]", "_", raw_session_id)
+    if not normalized:
+        normalized = "openai-anonymous"
+    if not re.match(r"^[A-Za-z0-9]", normalized):
+        normalized = f"s{normalized}"
+    return normalized[:128]
+
+
+def _infer_openai_session_id(body: OpenAIChatCompletionRequest, request: Request) -> SessionId:
+    if body.session_id:
+        return _normalize_session_id(body.session_id)
+    if body.user:
+        return _normalize_session_id(body.user)
+    authorization = request.headers.get("authorization", "")
+    if authorization:
+        return _normalize_session_id(
+            f"openai-{hashlib.sha256(authorization.encode('utf-8')).hexdigest()[:16]}"
+        )
+    return "openai-anonymous"
+
+
+def _flatten_openai_messages(messages: list[OpenAIChatCompletionMessage]) -> str:
+    system_parts: list[str] = []
+    conversation_parts: list[str] = []
+    for message in messages:
+        if message.role == "system":
+            system_parts.append(message.content)
+        elif message.role == "assistant":
+            conversation_parts.append(f"Assistant: {message.content}")
+        else:
+            conversation_parts.append(message.content)
+
+    prompt = "\n\n".join(system_parts + conversation_parts)
+    return prompt.strip()
+
+
+def _parse_sse_event(raw_event: str) -> tuple[str, Any]:
+    event_name = ""
+    data_lines: list[str] = []
+    for line in raw_event.splitlines():
+        if line.startswith("event:"):
+            event_name = line.split(":", 1)[1].strip()
+        elif line.startswith("data:"):
+            data_lines.append(line.split(":", 1)[1].strip())
+    data = None
+    if data_lines:
+        try:
+            data = json.loads("\n".join(data_lines))
+        except json.JSONDecodeError:
+            data = "\n".join(data_lines)
+    return event_name, data
+
+
+async def _run_openai_completion(
+    session_id: SessionId,
+    prompt: str,
+    principal: Principal,
+) -> str:
+    try:
+        await session_registry.initialize_session(
+            session_id,
+            tenant_id=principal.tenant_id,
+            owner_subject=principal.subject,
+        )
+    except Exception:
+        pass
+
+    response_text = ""
+    async for raw_event in sse_query_generator(
+        session_id,
+        prompt,
+        True,
+        False,
+        tenant_id=principal.tenant_id,
+        owner_subject=principal.subject,
+        create_session=True,
+    ):
+        event_name, data = _parse_sse_event(raw_event)
+        if event_name == "response_content" and isinstance(data, str):
+            response_text = data
+        elif event_name == "error":
+            raise HTTPException(status_code=502, detail=str(data or "Engine error"))
+    return response_text
+
+
+async def _openai_streaming_generator(
+    session_id: SessionId,
+    prompt: str,
+    principal: Principal,
+) -> AsyncIterator[str]:
+    chat_id = f"chatcmpl-{hashlib.sha256(session_id.encode('utf-8')).hexdigest()[:16]}"
+    sent_chunk = False
+
+    async for raw_event in sse_query_generator(
+        session_id,
+        prompt,
+        True,
+        False,
+        tenant_id=principal.tenant_id,
+        owner_subject=principal.subject,
+        create_session=True,
+    ):
+        event_name, data = _parse_sse_event(raw_event)
+        if event_name == "response_content" and isinstance(data, str):
+            chunk = {
+                "id": chat_id,
+                "object": "chat.completion.chunk",
+                "choices": [
+                    {
+                        "delta": {"role": "assistant", "content": data},
+                        "index": 0,
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            sent_chunk = True
+            yield f"data: {json.dumps(chunk)}\n\n"
+        elif event_name == "error":
+            error_chunk = {"error": str(data or "Engine error")}
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+    if sent_chunk:
+        yield "data: [DONE]\n\n"
+    else:
+        yield "data: [DONE]\n\n"
+
+
+@app.post(
+    "/v1/chat/completions",
+    response_model=None,
+)
+@app.post(
+    "/openai/v1/chat/completions",
+    response_model=None,
+)
+@app.post(
+    "/api/agent/query/v1/chat/completions",
+    response_model=None,
+)
+@app.post(
+    "/api/agent/query/openai/v1/chat/completions",
+    response_model=None,
+)
+async def openai_chat_completions(
+    body: OpenAIChatCompletionRequest,
+    request: Request,
+    principal: CurrentPrincipal,
+):
+    prompt = body.prompt
+    if not prompt and body.messages:
+        prompt = _flatten_openai_messages(body.messages)
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Either messages or prompt must be provided")
+
+    session_id = _infer_openai_session_id(body, request)
+
+    if body.stream:
+        return StreamingResponse(
+            _openai_streaming_generator(session_id, prompt, principal),
+            media_type="text/event-stream",
+        )
+
+    response_text = await _run_openai_completion(session_id, prompt, principal)
+    return {
+        "id": f"chatcmpl-{hashlib.sha256((session_id + prompt).encode('utf-8')).hexdigest()[:16]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": body.model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": response_text},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": max(1, len(prompt) // 4),
+            "completion_tokens": max(1, len(response_text) // 4),
+            "total_tokens": max(1, len(prompt) // 4 + len(response_text) // 4),
+        },
+    }
 
 
 def _build_action_payload(action: Any) -> dict[str, Any] | None:

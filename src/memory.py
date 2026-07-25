@@ -158,6 +158,18 @@ class StateManifest:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SessionPurgeResult:
+    """Serialized purge outcome across registry, vector, and external state."""
+
+    session_found: bool
+    memory_removed: bool
+    vector_removed: bool
+    external_existed: bool
+    external_removed: bool
+    errors: tuple[str, ...]
+
+
 class ManifestedHistory(list):
     """List that refreshes a session manifest whenever history is mutated."""
 
@@ -606,30 +618,73 @@ class MultiTenantSessionRegistry:
         its ephemeral collection. This does not guarantee physical RAM erasure.
         Uses exclusive write lock.
         """
+        result = await self.purge_session(
+            session_id,
+            tenant_id=tenant_id,
+            owner_subject=owner_subject,
+        )
+        return result.memory_removed
+
+    async def purge_session(
+        self,
+        session_id: str,
+        *,
+        tenant_id: str | None = None,
+        owner_subject: str | None = None,
+        external_cleanup: Callable[[], tuple[bool, bool]] | None = None,
+    ) -> SessionPurgeResult:
+        """Serialize deletion of registry, vector, and injected external state."""
         lock = self.get_session_lock(session_id)
         async with lock:
+            errors: list[str] = []
             session = self._sessions.get(session_id)
-            if not session:
-                return False
-            self._assert_owner(
-                session,
-                tenant_id=tenant_id,
-                owner_subject=owner_subject,
-            )
-            self._sessions.pop(session_id)
-
-            try:
-                session.chroma_client.delete_collection(f"session_{session_id}")
-            except Exception as e:
-                logger.warning(
-                    "Error purging vector space for session",
-                    extra={"session_id": session_id},
-                    exc_info=True,
+            if session is not None:
+                self._assert_owner(
+                    session,
+                    tenant_id=tenant_id,
+                    owner_subject=owner_subject,
                 )
-                log_error("memory.flush_session.delete_collection", str(e))
+                self._sessions.pop(session_id)
 
-            logger.info(f"Programmatic /burn executed successfully. Purged space for: {session_id}")
-            return True
+            vector_removed = session is None
+            if session is not None:
+                try:
+                    session.chroma_client.delete_collection(f"session_{session_id}")
+                    vector_removed = True
+                except Exception as exc:
+                    logger.warning(
+                        "Error purging vector space for session",
+                        extra={"session_id": session_id},
+                        exc_info=True,
+                    )
+                    log_error("memory.purge_session.delete_collection", str(exc))
+                    errors.append("vector_delete_failed")
+
+            external_existed = False
+            external_removed = False
+            if external_cleanup is not None:
+                try:
+                    external_existed, external_removed = external_cleanup()
+                except Exception:
+                    logger.exception(
+                        "External session cleanup failed",
+                        extra={"session_id": session_id},
+                    )
+                    errors.append("external_delete_failed")
+
+            if session is not None:
+                logger.info(
+                    "Programmatic session purge completed",
+                    extra={"session_id": session_id},
+                )
+            return SessionPurgeResult(
+                session_found=session is not None,
+                memory_removed=session is not None,
+                vector_removed=vector_removed,
+                external_existed=external_existed,
+                external_removed=external_removed,
+                errors=tuple(errors),
+            )
 
     def _assert_state_integrity(self, session: SessionRecord) -> None:
         if session.validate_manifest():
