@@ -59,3 +59,24 @@ def test_openai_models_list_endpoint():
             assert any(m["id"] == "sc-evm-proxy" for m in data["data"])
 
     asyncio.run(exercise())
+
+
+def test_openai_chat_completions_sanitizes_empty_messages():
+    async def exercise():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            # Rejects payloads with only empty or whitespace message contents
+            res_empty = await client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "sc-evm-proxy",
+                    "messages": [
+                        {"role": "system", "content": ""},
+                        {"role": "user", "content": "   "},
+                    ],
+                },
+            )
+            assert res_empty.status_code == 400
+            assert "Either messages or prompt must be provided" in res_empty.json()["detail"]
+
+    asyncio.run(exercise())
