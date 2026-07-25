@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     MODEL_2_INPUT_PRICE_PER_1K: float = Field(default=0.0005, ge=0.0)
     MODEL_2_OUTPUT_PRICE_PER_1K: float = Field(default=0.0006, ge=0.0)
     MODEL_CANDIDATE_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
-    MODEL_REFORMULATION_MAX_TOKENS: int = Field(default=1024, ge=1, le=131_072)
+    MODEL_REFORMULATION_MAX_TOKENS: int = Field(default=2048, ge=1, le=131_072)
     MODEL_SYNTHESIS_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
 
     # Network Security
