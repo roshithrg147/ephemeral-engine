@@ -791,6 +791,24 @@ async def _openai_streaming_generator(
         yield "data: [DONE]\n\n"
 
 
+@app.get("/v1/models")
+@app.get("/openai/v1/models")
+@app.get("/api/agent/query/v1/models")
+@app.get("/api/agent/query/openai/v1/models")
+async def openai_list_models():
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": "sc-evm-proxy",
+                "object": "model",
+                "created": 1700000000,
+                "owned_by": "sc-evm",
+            }
+        ],
+    }
+
+
 @app.post(
     "/v1/chat/completions",
     response_model=None,

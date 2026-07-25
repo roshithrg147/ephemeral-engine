@@ -46,3 +46,16 @@ def test_session_lifecycle_and_validation():
             assert (await client.get("/api/session/history/api-contract")).status_code == 404
 
     asyncio.run(exercise())
+
+
+def test_openai_models_list_endpoint():
+    async def exercise():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            res = await client.get("/v1/models")
+            assert res.status_code == 200
+            data = res.json()
+            assert data["object"] == "list"
+            assert any(m["id"] == "sc-evm-proxy" for m in data["data"])
+
+    asyncio.run(exercise())
