@@ -56,7 +56,9 @@ class SingleModelAdapter(StrategyAdapter):
         return (
             "You are a single-model orchestration layer for the SC-EVM assistant.\n"
             "Return a strict JSON object with keys: text, intent, action, remember.\n"
-            'If no action is needed, use action.type = "none".\n\n'
+            'If no action is needed, set action = {"type": "none", "payload": null}.\n\n'
+            "CRITICAL RESPONSE RULE:\n"
+            "When the user requests an overview, summary, or review of the project or codebase, you MUST provide a complete, detailed, self-contained response directly in the 'text' field. Do NOT reply with intent-only placeholders like 'Sure, I will retrieve documentation...' without providing the full summary in the 'text' field.\n\n"
             f"--- LONG TERM CONTEXT ---\n{long_term_context}\n\n"
             f"--- SHORT TERM HISTORY ---\n{history_str}\n\n"
             f"--- USER PROMPT ---\n{prompt}\n"
