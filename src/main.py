@@ -1004,8 +1004,8 @@ async def dual_llm_process(
             tenant_id=principal.tenant_id,
             owner_subject=principal.subject,
         ) as record:
-            adapter = await get_single_model_adapter()
-            result = await adapter.solve(body.prompt, body.session_id)
+            orchestrator = await get_orchestrator()
+            result = await orchestrator.adapter.solve(body.prompt, body.session_id)
 
             action_data = result.get("action") or {"type": "none"}
             action_payload = {"type": action_data.get("type", "none"), "payload": action_data.get("payload")}

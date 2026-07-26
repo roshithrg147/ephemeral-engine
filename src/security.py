@@ -252,14 +252,21 @@ def _init_firebase_app() -> None:
     if _FIREBASE_APP_INITIALIZED:
         return
     import os
+
     import firebase_admin
     from firebase_admin import credentials
+
     if not firebase_admin._apps:
         if settings.FIREBASE_CREDENTIALS_PATH and os.path.exists(settings.FIREBASE_CREDENTIALS_PATH):
             cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
-            firebase_admin.initialize_app(cred, {"projectId": settings.FIREBASE_PROJECT_ID} if settings.FIREBASE_PROJECT_ID else None)
+            firebase_admin.initialize_app(
+                cred,
+                {"projectId": settings.FIREBASE_PROJECT_ID} if settings.FIREBASE_PROJECT_ID else None,
+            )
         else:
-            options = {"projectId": settings.FIREBASE_PROJECT_ID} if settings.FIREBASE_PROJECT_ID else None
+            options = (
+                {"projectId": settings.FIREBASE_PROJECT_ID} if settings.FIREBASE_PROJECT_ID else None
+            )
             firebase_admin.initialize_app(options=options)
     _FIREBASE_APP_INITIALIZED = True
 
@@ -267,8 +274,8 @@ def _init_firebase_app() -> None:
 async def verify_firebase_token_async(token: str) -> Principal:
     """Verify a Firebase ID token using firebase_admin.auth."""
     try:
-        import firebase_admin
         from firebase_admin import auth
+
         _init_firebase_app()
         decoded = await asyncio.to_thread(auth.verify_id_token, token)
     except Exception as exc:
