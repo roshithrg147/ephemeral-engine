@@ -2967,3 +2967,333 @@ th:last-child {
   white-space: nowrap;
 }
 
+/* Replit Dashboard & Workspace UI Matching Styles */
+.dashboard-status-header {
+  margin-bottom: 16px;
+}
+
+.status-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.brand-badge {
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-family: 'Fira Code', monospace;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+}
+
+.pill-online {
+  color: var(--color-success);
+  border-color: rgba(52, 211, 153, 0.3);
+  background: rgba(52, 211, 153, 0.08);
+}
+
+.pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 8px var(--color-success);
+  animation: pulse-ring 2s infinite;
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+.six-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+}
+
+.timeline-section {
+  margin-bottom: 20px;
+}
+
+.section-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.section-title-wrap h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.timeline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.timeline-item {
+  padding: 10px 14px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timeline-ago {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.timeline-event {
+  font-size: 13px;
+  font-family: 'Fira Code', monospace;
+  color: var(--text-primary);
+}
+
+.timeline-src {
+  font-size: 11px;
+  color: var(--color-primary);
+}
+
+.charts-three-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.active-sessions-section {
+  margin-bottom: 24px;
+}
+
+.sessions-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.session-item-card {
+  padding: 12px 16px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.session-duration {
+  font-size: 11px;
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.session-id-text {
+  font-family: 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.session-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.event-feed-section {
+  margin-bottom: 24px;
+}
+
+.event-feed-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.new-count-badge {
+  font-size: 11px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.feed-filter-tabs, .events-filter-bar {
+  display: flex;
+  gap: 4px;
+}
+
+.feed-filter-btn, .filter-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+  color: var(--text-secondary);
+}
+
+.feed-filter-btn.is-active, .filter-btn.is-active {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+
+.feed-log-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-top: 10px;
+}
+
+.feed-log-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  font-family: 'Fira Code', monospace;
+  padding: 6px 12px;
+  background: var(--surface-subtle);
+  border-radius: 6px;
+  border-left: 3px solid var(--color-primary);
+}
+
+.feed-log-time {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.feed-log-type {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.feed-log-src {
+  color: var(--color-secondary);
+}
+
+.feed-log-msg {
+  color: var(--text-primary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.events-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.event-log-item {
+  padding: 10px;
+  background: var(--surface-subtle);
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+
+.event-log-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-family: 'Fira Code', monospace;
+}
+
+.event-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.tag-error {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.event-summary {
+  flex: 1;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-json {
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--surface-canvas);
+  border-radius: 6px;
+  font-size: 11px;
+  overflow-x: auto;
+  color: var(--text-primary);
+}
+
+.context-card-query {
+  border-left: 3px solid var(--color-accent);
+  background: var(--surface-subtle);
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.query-field {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.query-field small {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+
+.query-field code {
+  font-size: 11px;
+  font-family: 'Fira Code', monospace;
+  color: var(--color-accent);
+}
+
