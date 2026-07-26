@@ -1,6 +1,7 @@
 import React, {
   createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -25,6 +26,8 @@ import {
 import Navigation from './components/Navigation';
 import DashboardPage from './pages/DashboardPage';
 import ChatPage from './pages/ChatPage';
+import LoginPage from './pages/LoginPage';
+import { AuthContext, AuthProvider } from './context/AuthContext';
 
 export const TelemetryContext = createContext(null);
 
@@ -124,6 +127,7 @@ function AppShell() {
   const [theme, setTheme] = useState(() => localStorage.getItem('sc-evm-theme') || 'dark');
   const mainContentRef = useRef(null);
 
+  const { getAuthHeaders } = useContext(AuthContext);
   const apiUrl = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000';
 
   useEffect(() => {
@@ -139,17 +143,19 @@ function AppShell() {
     const defaultSession = 'session_1';
     const response = await fetch(`${apiUrl}/api/session/initialize`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ session_id: defaultSession }),
     });
     if (!response.ok) throw new Error(`Session initialization failed (${response.status})`);
     return defaultSession;
-  }, [apiUrl]);
+  }, [apiUrl, getAuthHeaders]);
 
   const refreshSessions = useCallback(async (preferredSessionId = '') => {
     setConnectionStatus('connecting');
     try {
-      const response = await fetch(`${apiUrl}/api/session/list`);
+      const response = await fetch(`${apiUrl}/api/session/list`, {
+        headers: getAuthHeaders(),
+      });
       if (!response.ok) throw new Error(`Backend returned ${response.status}`);
       const payload = await response.json();
       let sessions = payload.status === 'success' && Array.isArray(payload.data)
@@ -179,7 +185,7 @@ function AppShell() {
       setNotice(`Control plane unavailable. ${error.message}.`);
       return [];
     }
-  }, [apiUrl, initializeDefaultSession]);
+  }, [apiUrl, getAuthHeaders, initializeDefaultSession]);
 
   useEffect(() => {
     refreshSessions();
@@ -197,6 +203,7 @@ function AppShell() {
     try {
       const response = await fetch(`${apiUrl}/api/session/burn/${encodeURIComponent(sessionId)}`, {
         method: 'DELETE',
+        headers: getAuthHeaders(),
       });
       if (!response.ok) throw new Error(`Burn failed (${response.status})`);
       await refreshSessions();
@@ -219,7 +226,7 @@ function AppShell() {
     } finally {
       setIsBurning(false);
     }
-  }, [apiUrl, refreshSessions]);
+  }, [apiUrl, getAuthHeaders, refreshSessions]);
 
   const handleConfirmBurn = async () => {
     const burned = await burnSession(sessionState.activeSessionId);
@@ -234,11 +241,12 @@ function AppShell() {
     apiUrl,
     burnSession,
     connectionStatus,
+    getAuthHeaders,
     refreshSessions,
     sessionState,
     setNotice,
     setSessionState,
-  }), [apiUrl, burnSession, connectionStatus, refreshSessions, sessionState]);
+  }), [apiUrl, burnSession, connectionStatus, getAuthHeaders, refreshSessions, sessionState]);
 
   return (
     <TelemetryContext.Provider value={contextValue}>
@@ -332,8 +340,13 @@ function AppShell() {
 
 export default function App() {
   return (
-    <Router>
-      <AppShell />
-    </Router>
+    <AuthProvider>
+      <Router>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/*" element={<AppShell />} />
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 }

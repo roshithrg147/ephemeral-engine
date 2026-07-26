@@ -57,10 +57,11 @@ async def consume_sse_tokens(client: httpx.AsyncClient, session_id: str, prompt:
                 current_event = line[len("event: ") :].strip()
             elif line.startswith("data: "):
                 data_str = line[len("data: ") :].strip()
-                if current_event == "token":
+                if current_event in ("token", "response_content"):
                     try:
                         token = json.loads(data_str)
-                        full_text += token
+                        if isinstance(token, str):
+                            full_text += token
                     except Exception as e:
                         log_event(
                             "TokenParseError",

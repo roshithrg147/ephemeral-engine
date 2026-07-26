@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from src.agent import AgentOrchestrator
+from src.agent import Action, ActionPayload, RefinedResponse
 from src.config import settings
 from src.memory import session_registry, warm_memory_runtime
 from src.sc_evm import SCEVMEngine
@@ -36,6 +36,7 @@ from src.services.session_runtime import (
     get_indexed_documents,
     index_interaction,
 )
+from src.strategies.single_model_adapter import SingleModelAdapter
 from src.telemetry_sink import log_error
 from src.tools import sandbox_fs
 
@@ -43,6 +44,60 @@ from src.tools import sandbox_fs
 sc_evm_engine = SCEVMEngine()
 prompt_manager = PromptManager()
 logger = logging.getLogger("SC-EVM.API")
+
+
+class SingleModelOrchestrator:
+    def __init__(self, model_connector: ModelConnector | None = None):
+        self.adapter = SingleModelAdapter()
+
+    async def generate_response_async(self, memory_snapshot: Any, prompt: str) -> RefinedResponse:
+        session_id = getattr(memory_snapshot, "session_id", "default-session")
+        if isinstance(memory_snapshot, dict):
+            session_id = memory_snapshot.get("session_id", session_id)
+        res = await self.adapter.solve(prompt, session_id)
+        action_dict = res.get("action") or {"type": "none"}
+        action_payload = action_dict.get("payload")
+        payload_obj = ActionPayload(**action_payload) if isinstance(action_payload, dict) else None
+        return RefinedResponse(
+            text=res.get("response_text", ""),
+            intent=res.get("intent", "chat"),
+            action=Action(type=action_dict.get("type", "none"), payload=payload_obj),
+            remember=res.get("remember", []),
+            usage_records=[
+                {
+                    "measurement_type": "estimate",
+                    "status": "completed",
+                    "stage": "single_model_generation",
+                    "provider": "nvidia",
+                    "model": settings.MODEL_1_FLASH,
+                    "tokenizer": None,
+                    "input_tokens": res.get("tokens_in", len(prompt) // 4),
+                    "output_tokens": res.get("tokens_out", len(res.get("response_text", "")) // 4),
+                    "cached_tokens": None,
+                    "retry_usage": None,
+                    "missing_reason": None,
+                    "price_table_version": "v1.0",
+                    "calculated_cost": None,
+                    "latency_seconds": res.get("total_latency"),
+                    "attempts": [],
+                    "finish_reason": "stop",
+                }
+            ],
+        )
+
+    def generate_response(self, memory_snapshot: Any, prompt: str) -> RefinedResponse:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(
+                self.generate_response_async(memory_snapshot, prompt), loop
+            )
+            return future.result()
+        return asyncio.run(self.generate_response_async(memory_snapshot, prompt))
+
 
 _ORCHESTRATOR: Any | None = None
 _ORCHESTRATOR_LOCK: asyncio.Lock = asyncio.Lock()
@@ -52,22 +107,33 @@ _ORCHESTRATION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 )
 
 
-async def run_orchestrator(orchestrator: AgentOrchestrator, memory_snapshot: Any, prompt: str):
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        _ORCHESTRATION_EXECUTOR,
-        orchestrator.generate_response,
-        memory_snapshot,
-        prompt,
-    )
+async def run_orchestrator(orchestrator: Any, memory_snapshot: Any, prompt: str) -> RefinedResponse:
+    try:
+        if hasattr(orchestrator, "generate_response_async"):
+            return await orchestrator.generate_response_async(memory_snapshot, prompt)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            _ORCHESTRATION_EXECUTOR,
+            orchestrator.generate_response,
+            memory_snapshot,
+            prompt,
+        )
+    except Exception as e:
+        logger.error(f"Orchestrator execution failed: {e}", exc_info=True)
+        return RefinedResponse(
+            text=f"An error occurred while generating the model response ({e}).",
+            intent="chat",
+            action=Action(type="none"),
+            remember=[],
+        )
 
 
-async def get_orchestrator() -> AgentOrchestrator:
+async def get_orchestrator() -> Any:
     global _ORCHESTRATOR
     if _ORCHESTRATOR is None:
         async with _ORCHESTRATOR_LOCK:
             if _ORCHESTRATOR is None:
-                _ORCHESTRATOR = AgentOrchestrator(model_connector=ModelConnector())
+                _ORCHESTRATOR = SingleModelOrchestrator()
     return _ORCHESTRATOR
 
 
@@ -239,6 +305,8 @@ async def burn_session(
         )
         if not flushed:
             raise HTTPException(status_code=404, detail="Session not found")
+        if _ORCHESTRATOR and hasattr(_ORCHESTRATOR, "adapter"):
+            await _ORCHESTRATOR.adapter.clear_session(session_id)
         return StandardResponseEnvelope(
             status="success", message=f"Session {session_id} successfully flushed from memory"
         )
@@ -387,7 +455,7 @@ async def _sse_query_generator_locked(
 ) -> AsyncIterator[str]:
     """Run one complete query while the session lifecycle lock is held."""
     history = list(record.chat_history)
-    memory_snapshot = build_memory_snapshot(record)
+    memory_snapshot = build_memory_snapshot(record, session_id=session_id)
     memory_anchors = record.metadata_registry.get(
         "learned_facts", []
     ) + record.metadata_registry.get("pending_commit_buffer", [])
@@ -470,7 +538,7 @@ async def _sse_query_generator_locked(
 
     context_str = "\n\n".join(context_list)
 
-    # 4. Invoke Dual-LLM Agent Orchestrator to generate response and actions
+    # 4. Invoke Orchestrator to generate response and actions
     orchestrator = await get_orchestrator()
 
     # Build augmented prompt for the orchestrator, passing SC-EVM context
@@ -485,13 +553,13 @@ async def _sse_query_generator_locked(
 
     try:
         refined_response = await run_orchestrator(orchestrator, memory_snapshot, augmented_prompt)
-        commit_remembered_facts(record, refined_response.remember)
+        commit_remembered_facts(record, getattr(refined_response, "remember", []))
 
-        full_response_text = refined_response.text
-        generation_succeeded = True
+        full_response_text = getattr(refined_response, "text", "")
+        generation_succeeded = bool(full_response_text.strip())
 
         # Format action payload
-        action_payload = _build_action_payload(refined_response.action)
+        action_payload = _build_action_payload(getattr(refined_response, "action", None))
         if action_payload:
             full_response_text, action_type, payload = _apply_phase_gate(
                 record,
@@ -505,10 +573,10 @@ async def _sse_query_generator_locked(
         # Staged response delivery: Yield the complete staged response content in a single event without delay
         yield f"event: response_content\ndata: {json.dumps(full_response_text)}\n\n"
 
-        if refined_response.degraded:
+        if getattr(refined_response, "degraded", False):
             degradation_payload = {
                 "degraded": True,
-                "reasons": refined_response.degradation_reasons,
+                "reasons": getattr(refined_response, "degradation_reasons", []),
             }
             yield f"event: degradation\ndata: {json.dumps(degradation_payload)}\n\n"
 
@@ -567,9 +635,7 @@ async def _sse_query_generator_locked(
             )
 
         usage_report = rewrite_record + (
-            refined_response.usage_records
-            if refined_response and refined_response.usage_records
-            else []
+            getattr(refined_response, "usage_records", []) or []
         )
         yield f"event: usage_report\ndata: {json.dumps(usage_report)}\n\n"
 
@@ -579,8 +645,7 @@ async def _sse_query_generator_locked(
         yield f"event: token_usage\ndata: {json.dumps({'m1': m1_tokens, 'm2': m2_tokens})}\n\n"
 
         # Yield intent for analytics
-        if refined_response:
-            yield f"event: intent\ndata: {json.dumps(refined_response.intent)}\n\n"
+        yield f"event: intent\ndata: {json.dumps(getattr(refined_response, 'intent', 'chat'))}\n\n"
 
     except Exception as e:
         logger.error(
@@ -931,7 +996,7 @@ async def dual_llm_process(
     body: DualLLMRequest,
     principal: CurrentPrincipal,
 ) -> StandardResponseEnvelope:
-    """Directly triggers the Dual-LLM Orchestrator reasoning pass."""
+    """Directly triggers the Single-Model reasoning pass."""
     try:
         async with session_registry.session_operation(
             body.session_id,
@@ -939,16 +1004,16 @@ async def dual_llm_process(
             tenant_id=principal.tenant_id,
             owner_subject=principal.subject,
         ) as record:
-            memory_snapshot = build_memory_snapshot(record)
-            orchestrator = await get_orchestrator()
-            result = await run_orchestrator(orchestrator, memory_snapshot, body.prompt)
-            commit_remembered_facts(record, result.remember)
+            adapter = await get_single_model_adapter()
+            result = await adapter.solve(body.prompt, body.session_id)
 
-            action_payload = _build_action_payload(result.action)
-            if action_payload:
-                result.text, action_type, payload = _apply_phase_gate(
+            action_data = result.get("action") or {"type": "none"}
+            action_payload = {"type": action_data.get("type", "none"), "payload": action_data.get("payload")}
+            response_text = result.get("response_text", "")
+            if action_payload["type"] != "none":
+                response_text, action_type, payload = _apply_phase_gate(
                     record,
-                    result.text,
+                    response_text,
                     action_payload["type"],
                     action_payload["payload"],
                 )
@@ -959,15 +1024,15 @@ async def dual_llm_process(
 
             return StandardResponseEnvelope(
                 status="success",
-                message="Dual-LLM pass complete",
+                message="Single-model pass complete",
                 data={
-                    "text": result.text,
-                    "intent": result.intent,
+                    "text": response_text,
+                    "intent": result.get("intent", "chat"),
                     "action": action_payload,
                 },
             )
     except KeyError as e:
         raise HTTPException(status_code=404, detail="Session not found") from e
     except Exception as e:
-        logger.exception("Dual-LLM processing failed", extra={"session_id": body.session_id})
-        raise HTTPException(status_code=500, detail="Dual-LLM processing failed") from e
+        logger.exception("Single-model processing failed", extra={"session_id": body.session_id})
+        raise HTTPException(status_code=500, detail="Single-model processing failed") from e

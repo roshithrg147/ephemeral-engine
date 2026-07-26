@@ -272,8 +272,9 @@ class SCEVMEngine:
         if action_type == "none" or action_type == "update_memory":
             return True
 
-        if action_type == "save_file" and action_payload:
-            file_path = action_payload.get("file_path", "").lower()
+        if action_type == "save_file":
+            payload_dict = action_payload or {}
+            file_path = (payload_dict.get("file_path") or "").lower()
 
             # Identify UI code by extensions or path
             is_ui_code = (
@@ -306,8 +307,9 @@ class SCEVMEngine:
                 return False
 
         # For run_command, we might want to prevent npm start if UI is not ready, etc.
-        if action_type == "run_command" and action_payload:
-            cmd = action_payload.get("command", "").lower()
+        if action_type == "run_command":
+            payload_dict = action_payload or {}
+            cmd = (payload_dict.get("command") or "").lower()
             if ("npm" in cmd or "npx" in cmd or "react" in cmd) and current_phase < 3:
                 logging.getLogger("SC-EVM.Gate").warning(
                     f"Phase-gate blocked UI command '{cmd}' in phase {current_phase}"
