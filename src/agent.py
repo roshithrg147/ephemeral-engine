@@ -25,6 +25,7 @@ except ImportError:
 
 
 class MemorySnapshot(BaseModel):
+    session_id: str = ""
     long_term_context: str = ""
     short_term_history: list[dict[str, str]] = Field(default_factory=list)
 

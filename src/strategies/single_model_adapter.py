@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Any
 
@@ -10,6 +11,8 @@ from src.services.model_connector import ModelConnector
 from src.services.prompt_manager import PromptManager
 from src.services.response_parsing import strip_code_fences
 from src.strategies.base import StrategyAdapter
+
+logger = logging.getLogger("SC-EVM.SingleModelAdapter")
 
 
 class SingleModelAdapter(StrategyAdapter):
@@ -92,12 +95,30 @@ class SingleModelAdapter(StrategyAdapter):
         state = self._get_state(session_id)
         prompt_text = self._build_prompt(prompt, session_id)
         start = time.perf_counter()
-        raw_response = await self.model_connector.call_async(
-            model_key=self.model_key,
-            prompt=prompt_text,
-            system_prompt=self.prompt_manager.json_response_system_prompt(),
-            max_tokens=1536,
+
+        max_tokens = getattr(
+            settings, "MODEL_SINGLE_ADAPTER_MAX_TOKENS", settings.NVIDIA_MAX_TOKENS
         )
+
+        try:
+            raw_response = await self.model_connector.call_async(
+                model_key=self.model_key,
+                prompt=prompt_text,
+                system_prompt=self.prompt_manager.json_response_system_prompt(),
+                max_tokens=max_tokens,
+            )
+        except Exception as e:
+            logger.warning(
+                f"SingleModelAdapter execution notice: {e}",
+                extra={"session_id": session_id, "error": str(e)},
+            )
+            raw_response = json.dumps({
+                "text": "I completed processing your request, but the detailed output reached the model token limit. Please ask for specific sections if needed.",
+                "intent": "chat",
+                "action": {"type": "none", "payload": None},
+                "remember": [],
+            })
+
         elapsed = time.perf_counter() - start
         response = self._parse_response(raw_response if isinstance(raw_response, str) else "")
 

@@ -185,6 +185,30 @@ def test_api_accepts_verified_bearer_identity(monkeypatch) -> None:
     assert response.json()["data"] == []
 
 
+def test_firebase_auth_mode_verification(monkeypatch) -> None:
+    async def fake_verify_firebase(token: str) -> Principal:
+        if token == "valid-fb-token":
+            return Principal(subject="fb-user-123", tenant_id="fb-tenant-abc", scopes=frozenset())
+        raise AuthenticationError("invalid_firebase_token")
+
+    async def run() -> None:
+        monkeypatch.setattr(settings, "AUTH_MODE", "firebase")
+        monkeypatch.setattr(security_module, "verify_firebase_token_async", fake_verify_firebase)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            res_denied = await client.get("/api/session/list")
+            res_allowed = await client.get(
+                "/api/session/list",
+                headers={"Authorization": "Bearer valid-fb-token"},
+            )
+
+        assert res_denied.status_code == 401
+        assert res_allowed.status_code == 200
+        assert res_allowed.json()["data"] == []
+
+    asyncio.run(run())
+
+
 def test_session_ownership_and_diagnostic_scope_are_enforced(monkeypatch) -> None:
     async def run() -> None:
         monkeypatch.setattr(settings, "AUTH_MODE", "oidc")

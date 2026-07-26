@@ -152,6 +152,7 @@ export default function ChatPage() {
   const {
     apiUrl,
     burnSession,
+    getAuthHeaders,
     refreshSessions,
     sessionState,
     setNotice,
@@ -185,7 +186,7 @@ export default function ChatPage() {
       try {
         const response = await fetch(
           `${apiUrl}/api/session/history/${encodeURIComponent(sessionState.activeSessionId)}`,
-          { signal: controller.signal },
+          { headers: getAuthHeaders?.() || {}, signal: controller.signal },
         );
         if (!response.ok) throw new Error(`History request failed (${response.status})`);
         const payload = await response.json();
@@ -206,7 +207,7 @@ export default function ChatPage() {
 
     fetchSessionHistory();
     return () => controller.abort();
-  }, [apiUrl, sessionState.activeSessionId, setNotice, setSessionState]);
+  }, [apiUrl, getAuthHeaders, sessionState.activeSessionId, setNotice, setSessionState]);
 
   useEffect(() => () => abortControllerRef.current?.abort(), []);
 
@@ -320,7 +321,10 @@ export default function ChatPage() {
     try {
       const response = await fetch(`${apiUrl}/api/agent/query`, {
         method: 'POST',
-        headers: {
+        headers: getAuthHeaders?.({
+          Accept: 'text/event-stream',
+          'Content-Type': 'application/json',
+        }) || {
           Accept: 'text/event-stream',
           'Content-Type': 'application/json',
         },
@@ -426,7 +430,7 @@ export default function ChatPage() {
     try {
       const response = await fetch(`${apiUrl}/api/session/initialize`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders?.({ 'Content-Type': 'application/json' }) || { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: cleanName }),
       });
       if (!response.ok) throw new Error(`Runtime returned ${response.status}`);

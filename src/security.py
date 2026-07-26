@@ -244,11 +244,56 @@ def _unauthorized(reason_code: str) -> HTTPException:
     )
 
 
+_FIREBASE_APP_INITIALIZED = False
+
+
+def _init_firebase_app() -> None:
+    global _FIREBASE_APP_INITIALIZED
+    if _FIREBASE_APP_INITIALIZED:
+        return
+    import os
+    import firebase_admin
+    from firebase_admin import credentials
+    if not firebase_admin._apps:
+        if settings.FIREBASE_CREDENTIALS_PATH and os.path.exists(settings.FIREBASE_CREDENTIALS_PATH):
+            cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
+            firebase_admin.initialize_app(cred, {"projectId": settings.FIREBASE_PROJECT_ID} if settings.FIREBASE_PROJECT_ID else None)
+        else:
+            options = {"projectId": settings.FIREBASE_PROJECT_ID} if settings.FIREBASE_PROJECT_ID else None
+            firebase_admin.initialize_app(options=options)
+    _FIREBASE_APP_INITIALIZED = True
+
+
+async def verify_firebase_token_async(token: str) -> Principal:
+    """Verify a Firebase ID token using firebase_admin.auth."""
+    try:
+        import firebase_admin
+        from firebase_admin import auth
+        _init_firebase_app()
+        decoded = await asyncio.to_thread(auth.verify_id_token, token)
+    except Exception as exc:
+        raise AuthenticationError("invalid_firebase_token") from exc
+
+    subject = decoded.get("uid") or decoded.get("sub")
+    tenant_id = decoded.get("tenant_id") or decoded.get("firebase", {}).get("tenant") or subject
+    if not isinstance(subject, str) or not subject.strip():
+        raise AuthenticationError("invalid_subject")
+    if not isinstance(tenant_id, str) or not tenant_id.strip():
+        tenant_id = subject
+
+    scopes = _parse_scopes(decoded)
+    return Principal(
+        subject=subject,
+        tenant_id=tenant_id,
+        scopes=scopes,
+    )
+
+
 async def get_current_principal(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
 ) -> Principal:
-    """Resolve development identity or verify production OIDC bearer token."""
+    """Resolve development identity or verify production OIDC / Firebase bearer token."""
     if settings.AUTH_MODE == "disabled":
         return Principal(
             subject="development",
@@ -259,6 +304,20 @@ async def get_current_principal(
     if credentials is None or credentials.scheme.lower() != "bearer":
         log_security_event(request, outcome="denied", reason_code="missing_bearer")
         raise _unauthorized("missing_bearer")
+
+    if settings.AUTH_MODE == "firebase":
+        try:
+            principal = await verify_firebase_token_async(credentials.credentials)
+        except AuthenticationError as exc:
+            log_security_event(request, outcome="denied", reason_code=exc.reason_code)
+            raise _unauthorized(exc.reason_code) from exc
+        log_security_event(
+            request,
+            outcome="allowed",
+            reason_code="authenticated",
+            principal=principal,
+        )
+        return principal
 
     validator = get_oidc_validator(
         settings.OIDC_ISSUER,

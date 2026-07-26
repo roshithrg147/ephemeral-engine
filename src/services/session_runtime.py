@@ -16,7 +16,7 @@ logger = logging.getLogger("SC-EVM.SessionRuntime")
 _background_tasks: set[asyncio.Task] = set()
 
 
-def build_memory_snapshot(record) -> MemorySnapshot:
+def build_memory_snapshot(record, session_id: str = "") -> MemorySnapshot:
     facts = record.metadata_registry.get("learned_facts", [])
     long_term_context = ""
     if facts:
@@ -24,6 +24,7 @@ def build_memory_snapshot(record) -> MemorySnapshot:
             "Learned Facts about User:\n" + "\n".join(f"- {fact}" for fact in facts) + "\n"
         )
     return MemorySnapshot(
+        session_id=session_id,
         long_term_context=long_term_context,
         short_term_history=list(record.chat_history),
     )
