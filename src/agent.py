@@ -52,14 +52,28 @@ class Action(BaseModel):
         """Accept common provider shape drift without broadening executable action data."""
         if isinstance(value, str):
             return {"type": value, "payload": None}
-        if not isinstance(value, dict) or "type" in value:
-            return value
-        action_type = value.get("action") or value.get("action_type")
+        if not isinstance(value, dict):
+            return {"type": "none", "payload": None}
+
+        action_type = value.get("type") or value.get("action") or value.get("action_type") or "none"
         if not isinstance(action_type, str):
-            return value
+            action_type = "none"
+
         payload = value.get("payload")
-        if not isinstance(payload, dict):
-            payload = {
+        if isinstance(payload, str):
+            payload_str = payload.strip()
+            if action_type in ("read_file", "save_file"):
+                payload = {"file_path": payload_str}
+            elif action_type == "run_command":
+                payload = {"command": payload_str}
+            elif action_type == "list_files":
+                payload = {"glob": payload_str}
+            elif action_type == "image_generation":
+                payload = {"prompt": payload_str}
+            else:
+                payload = {"file_path": payload_str}
+        elif not isinstance(payload, (dict, ActionPayload)):
+            sibling_payload = {
                 key: value[key]
                 for key in (
                     "command",
@@ -71,7 +85,9 @@ class Action(BaseModel):
                 )
                 if key in value
             }
-        return {"type": action_type, "payload": payload or None}
+            payload = sibling_payload if sibling_payload else None
+
+        return {"type": action_type, "payload": payload}
 
 
 class RefinedResponse(BaseModel):

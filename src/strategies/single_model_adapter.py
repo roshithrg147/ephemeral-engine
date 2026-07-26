@@ -76,9 +76,13 @@ class SingleModelAdapter(StrategyAdapter):
             )
 
         action_data = data.get("action") or {"type": "none"}
-        if not isinstance(action_data, dict):
+        if not isinstance(action_data, (dict, str)):
             action_data = {"type": "none"}
-        action_data.setdefault("type", "none")
+
+        try:
+            action_obj = Action.model_validate(action_data)
+        except Exception:
+            action_obj = Action(type="none", payload=None)
 
         remember = data.get("remember") or []
         if not isinstance(remember, list):
@@ -87,7 +91,7 @@ class SingleModelAdapter(StrategyAdapter):
         return RefinedResponse(
             text=str(data.get("text", "")).strip(),
             intent=str(data.get("intent", "chat")),
-            action=Action(**action_data),
+            action=action_obj,
             remember=[str(item).strip() for item in remember if str(item).strip()],
         )
 

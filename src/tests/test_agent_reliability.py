@@ -138,3 +138,21 @@ def test_read_file_action_shape_is_preserved() -> None:
     assert result.action.type == "read_file"
     assert result.action.payload is not None
     assert result.action.payload.file_path == "src/main.ts"
+
+
+def test_string_payload_action_shape_is_normalized() -> None:
+    result = RefinedResponse.model_validate(
+        {
+            "text": "Reading package.json",
+            "intent": "file",
+            "action": {
+                "type": "read_file",
+                "payload": "engine-dashboard/package.json",
+            },
+            "remember": [],
+        }
+    )
+
+    assert result.action.type == "read_file"
+    assert result.action.payload is not None
+    assert result.action.payload.file_path == "engine-dashboard/package.json"
