@@ -11,10 +11,8 @@ import {
   Clipboard,
   Code2,
   Copy,
-  Database,
   FileCode2,
   Flame,
-  FolderKanban,
   Layers3,
   LoaderCircle,
   MessageSquare,
@@ -23,7 +21,6 @@ import {
   Send,
   ServerCog,
   Square,
-  Trash2,
 } from 'lucide-react';
 import { TelemetryContext } from '../App';
 import { parseSseFrame, splitSseFrames } from '../sse';
@@ -398,11 +395,6 @@ export default function ChatPage() {
 
   const stopGeneration = () => abortControllerRef.current?.abort();
 
-  const openCreateDialog = () => {
-    setDialogError('');
-    setSessionDialog({ mode: 'create' });
-  };
-
   const handleDialogConfirm = async (value) => {
     if (!sessionDialog) return;
     setDialogError('');
@@ -527,79 +519,19 @@ export default function ChatPage() {
   );
 
   return (
-    <div className="workspace-page">
-      <aside className="workspace-panel session-panel" aria-labelledby="sessions-heading">
-        <div className="workspace-panel-header">
-          <div>
-            <span className="eyebrow">Isolated contexts</span>
-            <h2 id="sessions-heading"><FolderKanban size={17} /> Sessions</h2>
-          </div>
-          <button
-            aria-label="Create session"
-            className="icon-button icon-button-primary"
-            onClick={openCreateDialog}
-            title="Create session"
-            type="button"
-          >
-            <Plus size={17} />
-          </button>
-        </div>
-        <div className="session-list">
-          {sessionState.sessions.length === 0 ? (
-            <EmptyState
-              description="A session will appear when the runtime connects."
-              icon={Database}
-              title="No sessions"
-            />
-          ) : sessionState.sessions.map((sessionId) => {
-            const isActive = sessionId === sessionState.activeSessionId;
-            return (
-              <div className={`session-row ${isActive ? 'is-active' : ''}`} key={sessionId}>
-                <button
-                  aria-current={isActive ? 'true' : undefined}
-                  className="session-select"
-                  onClick={() => setSessionState((previous) => ({
-                    ...previous,
-                    activeSessionId: sessionId,
-                  }))}
-                  title={sessionId}
-                  type="button"
-                >
-                  <MessageSquare size={15} aria-hidden="true" />
-                  <span>{sessionId}</span>
-                </button>
-                <button
-                  aria-label={`Burn session ${sessionId}`}
-                  className="session-delete"
-                  onClick={() => {
-                    setDialogError('');
-                    setSessionDialog({ mode: 'delete', sessionId });
-                  }}
-                  title="Burn session"
-                  type="button"
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-        <div className="session-panel-footer">
-          <span className="status-dot" aria-hidden="true" />
-          {sessionState.sessions.length} active {sessionState.sessions.length === 1 ? 'session' : 'sessions'}
-        </div>
-      </aside>
-
+    <div className="workspace-page expanded-chat-workspace">
       <section className="workspace-panel conversation-panel" aria-labelledby="conversation-heading">
         <div className="workspace-panel-header conversation-header">
           <div>
-            <span className="eyebrow">Bounded reasoning</span>
-            <h2 id="conversation-heading"><MessageSquare size={17} /> Conversation</h2>
+            <span className="eyebrow">Isolated Context: {sessionState.activeSessionId || 'default'}</span>
+            <h2 id="conversation-heading"><MessageSquare size={17} /> Bounded Reasoning Workspace</h2>
           </div>
-          <span className={`status-chip status-${isProcessing ? 'working' : 'ready'}`}>
-            {isProcessing && <LoaderCircle className="spinner-icon" size={14} />}
-            {isProcessing ? 'Generating' : 'Ready'}
-          </span>
+          <div className="header-status-group">
+            <span className={`status-chip status-${isProcessing ? 'working' : 'ready'}`}>
+              {isProcessing && <LoaderCircle className="spinner-icon" size={14} />}
+              {isProcessing ? 'Generating' : 'Ready'}
+            </span>
+          </div>
         </div>
 
         <div className="message-list" aria-live="polite">

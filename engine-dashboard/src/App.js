@@ -19,6 +19,7 @@ import {
   Database,
   Flame,
   Moon,
+  Plus,
   ShieldCheck,
   Sun,
   X,
@@ -117,6 +118,69 @@ function ConfirmDialog({ open, title, description, confirmLabel, busy, onCancel,
   );
 }
 
+function CreateSessionDialog({ open, busy, error, onClose, onConfirm }) {
+  const [name, setName] = useState('');
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setName('');
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, [open]);
+
+  if (!open) return null;
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    onConfirm(name);
+  };
+
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={busy ? undefined : onClose}>
+      <form
+        aria-modal="true"
+        className="dialog-card"
+        onMouseDown={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+        role="dialog"
+      >
+        <div className="dialog-icon dialog-icon-primary">
+          <Plus size={22} />
+        </div>
+        <div>
+          <h2 className="dialog-title">Create Isolated Context</h2>
+          <p className="dialog-description">
+            Enter a unique session name for this isolated working context.
+          </p>
+        </div>
+        <div className="field-group">
+          <label htmlFor="create-session-name">Session Name</label>
+          <input
+            id="create-session-name"
+            className="text-input"
+            type="text"
+            placeholder="architecture-review"
+            maxLength={64}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            ref={inputRef}
+            required
+          />
+          {error && <p className="field-error" role="alert">{error}</p>}
+        </div>
+        <div className="dialog-actions">
+          <button className="button button-secondary" disabled={busy} onClick={onClose} type="button">
+            Cancel
+          </button>
+          <button className="button button-primary" disabled={busy || !name.trim()} type="submit">
+            {busy ? 'Creating…' : 'Create Context'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function AppShell() {
   const location = useLocation();
   const [sessionState, setSessionState] = useState(INITIAL_SESSION_STATE);
@@ -126,6 +190,9 @@ function AppShell() {
   const [isBurning, setIsBurning] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem('sc-evm-theme') || 'dark');
   const mainContentRef = useRef(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
 
   const { getAuthHeaders } = useContext(AuthContext);
   const apiUrl = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000';
@@ -139,19 +206,17 @@ function AppShell() {
     mainContentRef.current?.focus();
   }, [location.pathname]);
 
-  const initializeDefaultSession = useCallback(async () => {
-    const defaultSession = 'session_1';
+  const initializeDefaultSession = useCallback(async (customName = 'session_1') => {
     const response = await fetch(`${apiUrl}/api/session/initialize`, {
       method: 'POST',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ session_id: defaultSession }),
+      body: JSON.stringify({ session_id: customName }),
     });
     if (!response.ok) throw new Error(`Session initialization failed (${response.status})`);
-    return defaultSession;
+    return customName;
   }, [apiUrl, getAuthHeaders]);
 
   const refreshSessions = useCallback(async (preferredSessionId = '') => {
-    setConnectionStatus('connecting');
     try {
       const response = await fetch(`${apiUrl}/api/session/list`, {
         headers: getAuthHeaders(),
@@ -182,14 +247,42 @@ function AppShell() {
       return sessions;
     } catch (error) {
       setConnectionStatus('offline');
-      setNotice(`Control plane unavailable. ${error.message}.`);
       return [];
     }
   }, [apiUrl, getAuthHeaders, initializeDefaultSession]);
 
   useEffect(() => {
     refreshSessions();
+    const interval = setInterval(() => {
+      refreshSessions();
+    }, 4000);
+    return () => clearInterval(interval);
   }, [refreshSessions]);
+
+  const handleCreateSession = useCallback(async (sessionId) => {
+    const cleanId = sessionId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    if (!cleanId) {
+      setCreateError('Please enter a valid session name.');
+      return;
+    }
+    setIsCreating(true);
+    setCreateError('');
+    try {
+      await initializeDefaultSession(cleanId);
+      await refreshSessions(cleanId);
+      setSessionState((prev) => ({
+        ...prev,
+        activeSessionId: cleanId,
+        phase: 'AWAITING_INPUT',
+      }));
+      setNotice(`Session "${cleanId}" created.`);
+      setCreateDialogOpen(false);
+    } catch (err) {
+      setCreateError(err.message || 'Failed to create session');
+    } finally {
+      setIsCreating(false);
+    }
+  }, [initializeDefaultSession, refreshSessions]);
 
   useEffect(() => {
     if (!notice) return undefined;
@@ -252,7 +345,11 @@ function AppShell() {
     <TelemetryContext.Provider value={contextValue}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <div className="app-shell">
-        <Navigation connectionStatus={connectionStatus} />
+        <Navigation
+          connectionStatus={connectionStatus}
+          onRequestCreateSession={() => setCreateDialogOpen(true)}
+          onRequestBurnSession={() => setBurnDialogOpen(true)}
+        />
         <div className="app-column">
           <header className="topbar">
             <div className="topbar-title">
@@ -333,6 +430,14 @@ function AppShell() {
         onConfirm={handleConfirmBurn}
         open={burnDialogOpen}
         title="Burn this session?"
+      />
+
+      <CreateSessionDialog
+        busy={isCreating}
+        error={createError}
+        onClose={() => setCreateDialogOpen(false)}
+        onConfirm={handleCreateSession}
+        open={createDialogOpen}
       />
     </TelemetryContext.Provider>
   );

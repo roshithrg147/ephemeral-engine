@@ -1,30 +1,39 @@
-import React from 'react';
-import { Activity, LayoutDashboard, MessageSquare, Orbit } from 'lucide-react';
-import { NavLink } from 'react-router-dom';
+import React, { useContext, useState } from 'react';
+import {
+  Activity,
+  ChevronDown,
+  ChevronRight,
+  Flame,
+  LayoutDashboard,
+  MessageSquare,
+  Orbit,
+  Plus,
+} from 'lucide-react';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { TelemetryContext } from '../App';
 
-const navItems = [
-  { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
-  { to: '/chat', label: 'Workspace', icon: MessageSquare, end: false },
-];
+export default function Navigation({
+  connectionStatus,
+  onRequestCreateSession,
+  onRequestBurnSession,
+}) {
+  const { sessionState, setSessionState } = useContext(TelemetryContext) || {};
+  const [isContextsOpen, setIsContextsOpen] = useState(true);
+  const navigate = useNavigate();
 
-function NavigationLink({ item, mobile = false }) {
-  const Icon = item.icon;
-  return (
-    <NavLink
-      end={item.end}
-      to={item.to}
-      className={({ isActive }) => [
-        mobile ? 'mobile-nav-link' : 'nav-link',
-        isActive ? 'is-active' : '',
-      ].filter(Boolean).join(' ')}
-    >
-      <Icon size={mobile ? 19 : 18} strokeWidth={1.8} aria-hidden="true" />
-      <span>{item.label}</span>
-    </NavLink>
-  );
-}
+  const sessions = sessionState?.sessions || [];
+  const activeSessionId = sessionState?.activeSessionId || '';
 
-export default function Navigation({ connectionStatus }) {
+  const handleSelectSession = (sessionId) => {
+    if (setSessionState) {
+      setSessionState((previous) => ({
+        ...previous,
+        activeSessionId: sessionId,
+      }));
+    }
+    navigate('/chat');
+  };
+
   return (
     <>
       <aside className="sidebar" aria-label="Primary navigation">
@@ -39,8 +48,95 @@ export default function Navigation({ connectionStatus }) {
         </div>
 
         <nav className="sidebar-nav">
-          <p className="nav-section-label">Workspace</p>
-          {navItems.map((item) => <NavigationLink item={item} key={item.to} />)}
+          <p className="nav-section-label">Main Navigation</p>
+          
+          <NavLink
+            end
+            to="/"
+            className={({ isActive }) => `nav-link ${isActive ? 'is-active' : ''}`}
+          >
+            <LayoutDashboard size={18} strokeWidth={1.8} aria-hidden="true" />
+            <span>Overview</span>
+          </NavLink>
+
+          <div className="nav-section-wrap">
+            <NavLink
+              to="/chat"
+              className={({ isActive }) => `nav-link ${isActive ? 'is-active' : ''}`}
+            >
+              <MessageSquare size={18} strokeWidth={1.8} aria-hidden="true" />
+              <span>Workspace</span>
+            </NavLink>
+
+            {/* Collapsible Sub-Menu for ISOLATED CONTEXTS below Workspace */}
+            <div className="sub-menu-container">
+              <button
+                type="button"
+                className="sub-menu-toggle"
+                onClick={() => setIsContextsOpen((prev) => !prev)}
+                aria-expanded={isContextsOpen}
+              >
+                <div className="sub-menu-title">
+                  {isContextsOpen ? (
+                    <ChevronDown size={14} className="chevron-icon" />
+                  ) : (
+                    <ChevronRight size={14} className="chevron-icon" />
+                  )}
+                  <span>ISOLATED CONTEXTS</span>
+                </div>
+                <span className="sub-menu-badge">{sessions.length}</span>
+              </button>
+
+              {isContextsOpen && (
+                <div className="sub-menu-content">
+                  <button
+                    type="button"
+                    className="sub-menu-action-btn"
+                    onClick={onRequestCreateSession}
+                  >
+                    <Plus size={14} />
+                    <span>New Context</span>
+                  </button>
+
+                  <div className="context-item-list">
+                    {sessions.map((sessionId) => {
+                      const isActive = sessionId === activeSessionId;
+                      return (
+                        <div
+                          key={sessionId}
+                          className={`context-sub-item ${isActive ? 'is-active' : ''}`}
+                          onClick={() => handleSelectSession(sessionId)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSelectSession(sessionId);
+                          }}
+                        >
+                          <span className={`status-dot ${isActive ? 'active-dot' : ''}`} />
+                          <span className="context-item-name" title={sessionId}>
+                            {sessionId}
+                          </span>
+                          {isActive && (
+                            <button
+                              type="button"
+                              className="context-burn-btn"
+                              title="Burn session context"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onRequestBurnSession) onRequestBurnSession(sessionId);
+                              }}
+                            >
+                              <Flame size={13} />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </nav>
 
         <div className="sidebar-footer">
@@ -63,7 +159,21 @@ export default function Navigation({ connectionStatus }) {
       </aside>
 
       <nav className="mobile-nav" aria-label="Primary navigation">
-        {navItems.map((item) => <NavigationLink item={item} key={item.to} mobile />)}
+        <NavLink
+          end
+          to="/"
+          className={({ isActive }) => `mobile-nav-link ${isActive ? 'is-active' : ''}`}
+        >
+          <LayoutDashboard size={19} strokeWidth={1.8} aria-hidden="true" />
+          <span>Overview</span>
+        </NavLink>
+        <NavLink
+          to="/chat"
+          className={({ isActive }) => `mobile-nav-link ${isActive ? 'is-active' : ''}`}
+        >
+          <MessageSquare size={19} strokeWidth={1.8} aria-hidden="true" />
+          <span>Workspace</span>
+        </NavLink>
       </nav>
     </>
   );
