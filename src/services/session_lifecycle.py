@@ -75,8 +75,10 @@ class SessionLifecycleService:
         found = purge.session_found or purge.external_existed
         if not found:
             status: Literal["deleted", "not_found", "partial_failure"] = "not_found"
-        elif purge.errors or not purge.vector_removed or (
-            purge.external_existed and not purge.external_removed
+        elif (
+            purge.errors
+            or not purge.vector_removed
+            or (purge.external_existed and not purge.external_removed)
         ):
             status = "partial_failure"
         else:

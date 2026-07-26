@@ -634,9 +634,7 @@ async def _sse_query_generator_locked(
                 }
             )
 
-        usage_report = rewrite_record + (
-            getattr(refined_response, "usage_records", []) or []
-        )
+        usage_report = rewrite_record + (getattr(refined_response, "usage_records", []) or [])
         yield f"event: usage_report\ndata: {json.dumps(usage_report)}\n\n"
 
         # Yield legacy token usage estimates for backward compatibility
@@ -1008,7 +1006,10 @@ async def dual_llm_process(
             result = await orchestrator.adapter.solve(body.prompt, body.session_id)
 
             action_data = result.get("action") or {"type": "none"}
-            action_payload = {"type": action_data.get("type", "none"), "payload": action_data.get("payload")}
+            action_payload = {
+                "type": action_data.get("type", "none"),
+                "payload": action_data.get("payload"),
+            }
             response_text = result.get("response_text", "")
             if action_payload["type"] != "none":
                 response_text, action_type, payload = _apply_phase_gate(

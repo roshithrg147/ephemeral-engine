@@ -112,12 +112,14 @@ class SingleModelAdapter(StrategyAdapter):
                 f"SingleModelAdapter execution notice: {e}",
                 extra={"session_id": session_id, "error": str(e)},
             )
-            raw_response = json.dumps({
-                "text": "I completed processing your request, but the detailed output reached the model token limit. Please ask for specific sections if needed.",
-                "intent": "chat",
-                "action": {"type": "none", "payload": None},
-                "remember": [],
-            })
+            raw_response = json.dumps(
+                {
+                    "text": "I completed processing your request, but the detailed output reached the model token limit. Please ask for specific sections if needed.",
+                    "intent": "chat",
+                    "action": {"type": "none", "payload": None},
+                    "remember": [],
+                }
+            )
 
         elapsed = time.perf_counter() - start
         response = self._parse_response(raw_response if isinstance(raw_response, str) else "")
