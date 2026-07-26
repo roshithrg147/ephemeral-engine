@@ -257,15 +257,21 @@ def _init_firebase_app() -> None:
     from firebase_admin import credentials
 
     if not firebase_admin._apps:
-        if settings.FIREBASE_CREDENTIALS_PATH and os.path.exists(settings.FIREBASE_CREDENTIALS_PATH):
+        if settings.FIREBASE_CREDENTIALS_PATH and os.path.exists(
+            settings.FIREBASE_CREDENTIALS_PATH
+        ):
             cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
             firebase_admin.initialize_app(
                 cred,
-                {"projectId": settings.FIREBASE_PROJECT_ID} if settings.FIREBASE_PROJECT_ID else None,
+                {"projectId": settings.FIREBASE_PROJECT_ID}
+                if settings.FIREBASE_PROJECT_ID
+                else None,
             )
         else:
             options = (
-                {"projectId": settings.FIREBASE_PROJECT_ID} if settings.FIREBASE_PROJECT_ID else None
+                {"projectId": settings.FIREBASE_PROJECT_ID}
+                if settings.FIREBASE_PROJECT_ID
+                else None
             )
             firebase_admin.initialize_app(options=options)
     _FIREBASE_APP_INITIALIZED = True

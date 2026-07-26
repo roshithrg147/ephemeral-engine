@@ -122,7 +122,9 @@ class Settings(BaseSettings):
             )
         if self.DEPLOYMENT_MODE == "production":
             if self.AUTH_MODE not in ("oidc", "firebase"):
-                raise ValueError("Production deployment requires AUTH_MODE=oidc or AUTH_MODE=firebase")
+                raise ValueError(
+                    "Production deployment requires AUTH_MODE=oidc or AUTH_MODE=firebase"
+                )
             if self.AUTH_MODE == "oidc":
                 required_oidc = {
                     "OIDC_ISSUER": self.OIDC_ISSUER,
