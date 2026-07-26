@@ -27,6 +27,7 @@ import {
 import Navigation from './components/Navigation';
 import DashboardPage from './pages/DashboardPage';
 import ChatPage from './pages/ChatPage';
+import SettingsPage from './pages/SettingsPage';
 import LoginPage from './pages/LoginPage';
 import { AuthContext, AuthProvider } from './context/AuthContext';
 
@@ -326,7 +327,12 @@ function AppShell() {
     if (burned) setBurnDialogOpen(false);
   };
 
-  const pageTitle = location.pathname === '/chat' ? 'Workspace' : 'Overview';
+  const pageTitle =
+    location.pathname === '/chat'
+      ? 'Workspace'
+      : location.pathname === '/settings'
+        ? 'Settings & Diagnostics'
+        : 'Overview';
   const phaseIsBusy = ['STREAMING_CODE', 'STREAMING_RESPONSE', 'COMPUTING', 'Streaming Response']
     .includes(sessionState.phase);
 
@@ -401,6 +407,7 @@ function AppShell() {
             <Routes>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/chat" element={<ChatPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>

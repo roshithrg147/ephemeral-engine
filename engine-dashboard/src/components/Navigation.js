@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Orbit,
   Plus,
+  Sliders,
 } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { TelemetryContext } from '../App';
@@ -137,6 +138,14 @@ export default function Navigation({
               )}
             </div>
           </div>
+
+          <NavLink
+            to="/settings"
+            className={({ isActive }) => `nav-link ${isActive ? 'is-active' : ''}`}
+          >
+            <Sliders size={18} strokeWidth={1.8} aria-hidden="true" />
+            <span>Settings</span>
+          </NavLink>
         </nav>
 
         <div className="sidebar-footer">
@@ -173,6 +182,13 @@ export default function Navigation({
         >
           <MessageSquare size={19} strokeWidth={1.8} aria-hidden="true" />
           <span>Workspace</span>
+        </NavLink>
+        <NavLink
+          to="/settings"
+          className={({ isActive }) => `mobile-nav-link ${isActive ? 'is-active' : ''}`}
+        >
+          <Sliders size={19} strokeWidth={1.8} aria-hidden="true" />
+          <span>Settings</span>
         </NavLink>
       </nav>
     </>
