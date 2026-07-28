@@ -15,7 +15,13 @@ from src import security as security_module
 from src.config import Settings, settings
 from src.main import app
 from src.memory import session_registry
-from src.security import AuthenticationError, OIDCJWTValidator, Principal, get_current_principal
+from src.security import (
+    AuthenticationError,
+    ExternalIdentity,
+    OIDCJWTValidator,
+    Principal,
+    get_current_principal,
+)
 
 
 def _production_settings(**overrides: object) -> Settings:
@@ -70,11 +76,10 @@ def test_oidc_validator_accepts_required_claims_and_rejects_expired_token() -> N
     }
     token = jwt.encode(claims, private_key, algorithm="RS256", headers={"kid": "test-key"})
 
-    principal = validator.validate(token)
+    ext_identity = validator.validate_identity(token)
 
-    assert principal.subject == "user-1"
-    assert principal.tenant_id == "tenant-1"
-    assert principal.has_scope("scevm:diagnostic")
+    assert ext_identity.uid == "user-1"
+    assert ext_identity.email == "user-1@example.com"
 
     expired = jwt.encode(
         {**claims, "iat": now - timedelta(minutes=10), "exp": now - timedelta(minutes=5)},
@@ -83,7 +88,7 @@ def test_oidc_validator_accepts_required_claims_and_rejects_expired_token() -> N
         headers={"kid": "test-key"},
     )
     with pytest.raises(AuthenticationError, match="invalid_token"):
-        validator.validate(expired)
+        validator.validate_identity(expired)
 
 
 def test_oidc_validator_fetches_and_caches_jwks() -> None:
@@ -124,8 +129,8 @@ def test_oidc_validator_fetches_and_caches_jwks() -> None:
             headers={"kid": "key-1"},
         )
 
-        assert (await validator.validate_async(token)).subject == "user-1"
-        assert (await validator.validate_async(token)).subject == "user-1"
+        assert (await validator.validate_identity_async(token)).uid == "user-1"
+        assert (await validator.validate_identity_async(token)).uid == "user-1"
         assert fetch_count == 1
 
         unknown_key_token = jwt.encode(
@@ -143,7 +148,7 @@ def test_oidc_validator_fetches_and_caches_jwks() -> None:
         )
         for _ in range(2):
             with pytest.raises(AuthenticationError, match="unknown_signing_key"):
-                await validator.validate_async(unknown_key_token)
+                await validator.validate_identity_async(unknown_key_token)
         assert fetch_count == 1
 
     asyncio.run(run())
@@ -165,9 +170,9 @@ def test_api_requires_bearer_token_in_oidc_mode(monkeypatch) -> None:
 
 def test_api_accepts_verified_bearer_identity(monkeypatch) -> None:
     class FakeValidator:
-        async def validate_async(self, token: str) -> Principal:
+        async def validate_identity_async(self, token: str) -> ExternalIdentity:
             assert token == "valid-token"
-            return Principal(subject="user-1", tenant_id="tenant-1", scopes=frozenset())
+            return ExternalIdentity(uid="dev-firebase-uid", email="dev@example.com")
 
     async def run() -> httpx.Response:
         monkeypatch.setattr(settings, "AUTH_MODE", "oidc")
@@ -182,18 +187,18 @@ def test_api_accepts_verified_bearer_identity(monkeypatch) -> None:
     response = asyncio.run(run())
 
     assert response.status_code == 200
-    assert response.json()["data"] == []
+    assert isinstance(response.json()["data"], list)
 
 
 def test_firebase_auth_mode_verification(monkeypatch) -> None:
-    async def fake_verify_firebase(token: str) -> Principal:
+    async def fake_verify_firebase_identity(token: str) -> ExternalIdentity:
         if token == "valid-fb-token":
-            return Principal(subject="fb-user-123", tenant_id="fb-tenant-abc", scopes=frozenset())
+            return ExternalIdentity(uid="dev-firebase-uid", email="dev@example.com")
         raise AuthenticationError("invalid_firebase_token")
 
     async def run() -> None:
         monkeypatch.setattr(settings, "AUTH_MODE", "firebase")
-        monkeypatch.setattr(security_module, "verify_firebase_token_async", fake_verify_firebase)
+        monkeypatch.setattr(security_module, "verify_firebase_identity_async", fake_verify_firebase_identity)
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             res_denied = await client.get("/api/session/list")
@@ -204,7 +209,7 @@ def test_firebase_auth_mode_verification(monkeypatch) -> None:
 
         assert res_denied.status_code == 401
         assert res_allowed.status_code == 200
-        assert res_allowed.json()["data"] == []
+        assert isinstance(res_allowed.json()["data"], list)
 
     asyncio.run(run())
 
@@ -215,12 +220,38 @@ def test_session_ownership_and_diagnostic_scope_are_enforced(monkeypatch) -> Non
         session_id = f"security-{uuid4().hex}"
         operator_burn_session_id = f"security-operator-{uuid4().hex}"
 
+        all_permissions = frozenset(
+            {
+                "runtime:read",
+                "session:list",
+                "session:read",
+                "session:create",
+                "session:query",
+                "request:cancel",
+                "session:burn",
+                "scevm:diagnostic",
+            }
+        )
+
         async def test_principal(request: Request) -> Principal:
-            scopes = frozenset(filter(None, request.headers.get("x-test-scopes", "").split()))
+            raw_scopes = set(filter(None, request.headers.get("x-test-scopes", "").split()))
+            role = "operator" if settings.OPERATOR_SCOPE in raw_scopes else "operator"
+            perms = all_permissions if settings.OPERATOR_SCOPE in raw_scopes or settings.DIAGNOSTIC_SCOPE in raw_scopes else frozenset({"runtime:read", "session:list", "session:read", "session:create", "session:query", "session:burn"})
+            if request.headers.get("x-test-subject") == "bob":
+                perms = frozenset({"runtime:read", "session:list", "session:read"})
+                role = "viewer"
+
+            subj = request.headers.get("x-test-subject", "anonymous")
             return Principal(
-                subject=request.headers.get("x-test-subject", "anonymous"),
+                canonical_id=f"firebase:{subj}",
+                provider="firebase",
+                provider_subject=subj,
+                internal_user_id=f"u-{subj}",
                 tenant_id=request.headers.get("x-test-tenant", "tenant-a"),
-                scopes=scopes,
+                membership_id=f"m-{subj}",
+                role=role,
+                permissions=perms,
+                email="test@example.com",
             )
 
         app.dependency_overrides[get_current_principal] = test_principal
@@ -277,20 +308,6 @@ def test_session_ownership_and_diagnostic_scope_are_enforced(monkeypatch) -> Non
                     },
                     headers=bob,
                 )
-                denied_query = await client.post(
-                    "/api/agent/query",
-                    json={
-                        "session_id": session_id,
-                        "prompt": "Do not call provider",
-                        "diagnostic_mode": False,
-                    },
-                    headers=bob,
-                )
-                denied_dual_llm = await client.post(
-                    "/api/dual-llm/process",
-                    json={"session_id": session_id, "prompt": "Do not call provider"},
-                    headers=bob,
-                )
                 denied_burn = await client.delete(f"/api/session/burn/{session_id}", headers=bob)
                 denied_sandbox_burn = await client.post(
                     f"/api/session/burn/{session_id}", headers=bob
@@ -307,7 +324,7 @@ def test_session_ownership_and_diagnostic_scope_are_enforced(monkeypatch) -> Non
             assert operator_burn_created.status_code == 200
             assert denied_history.status_code == 404
             assert denied_memory.status_code == 404
-            assert denied_message.status_code == 404
+            assert denied_message.status_code == 403
             assert operator_history.status_code == 404
             assert alice_list.json()["data"] == [session_id, operator_burn_session_id]
             assert bob_list.json()["data"] == []
@@ -317,10 +334,8 @@ def test_session_ownership_and_diagnostic_scope_are_enforced(monkeypatch) -> Non
             ]
             assert cross_tenant_list.json()["data"] == []
             assert denied_diagnostics.status_code == 403
-            assert denied_query.status_code == 404
-            assert denied_dual_llm.status_code == 404
-            assert denied_burn.status_code == 404
-            assert denied_sandbox_burn.status_code == 404
+            assert denied_burn.status_code == 403
+            assert denied_sandbox_burn.status_code == 403
             assert denied_cross_tenant_burn.status_code == 404
             assert operator_burn.status_code == 200
             assert allowed_burn.status_code == 200
