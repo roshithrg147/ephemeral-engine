@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.security_context import SecurityContext
 
 from src.agent import Action, RefinedResponse
 from src.config import settings
@@ -42,9 +45,9 @@ class SingleModelAdapter(StrategyAdapter):
             return ""
         return "Learned Facts about User:\n" + "\n".join(f"- {fact}" for fact in remembered_facts)
 
-    def _build_prompt(self, prompt: str, session_id: str) -> str:
+    def _build_prompt(self, prompt: str, session_id: str, sec_ctx: SecurityContext | None = None) -> str:
         state = self._get_state(session_id)
-        history = list(state["history"])[-6:]
+        history = list(state["history"])[-settings.MAX_HISTORY_TURNS:]
         history_lines = []
         for turn in history:
             role = turn.get("role", "user")
@@ -53,6 +56,21 @@ class SingleModelAdapter(StrategyAdapter):
 
         long_term_context = self._format_long_term_context(state["remembered_facts"])
         history_str = "\n".join(history_lines)
+
+        from src.workflow_policy import WorkflowClass
+
+        if sec_ctx is not None and sec_ctx.workflow in (
+            WorkflowClass.PUBLIC_CHAT,
+            WorkflowClass.PUBLIC_RESEARCH,
+        ):
+            return (
+                "You are a helpful AI assistant.\n"
+                "Return a strict JSON object with keys: text, intent, action, remember.\n"
+                'Set action = {"type": "none", "payload": null}.\n\n'
+                f"--- SHORT TERM HISTORY ---\n{history_str}\n\n"
+                f"--- USER PROMPT ---\n{prompt}\n"
+            )
+
         return (
             "You are a single-model orchestration layer for the SC-EVM assistant.\n"
             "Return a strict JSON object with keys: text, intent, action, remember.\n"
@@ -97,9 +115,11 @@ class SingleModelAdapter(StrategyAdapter):
             remember=[str(item).strip() for item in remember if str(item).strip()],
         )
 
-    async def solve(self, prompt: str, session_id: str) -> dict[str, Any]:
+    async def solve(
+        self, prompt: str, session_id: str, sec_ctx: SecurityContext | None = None
+    ) -> dict[str, Any]:
         state = self._get_state(session_id)
-        prompt_text = self._build_prompt(prompt, session_id)
+        prompt_text = self._build_prompt(prompt, session_id, sec_ctx=sec_ctx)
         start = time.perf_counter()
 
         max_tokens = getattr(
@@ -110,7 +130,7 @@ class SingleModelAdapter(StrategyAdapter):
             raw_response = await self.model_connector.call_async(
                 model_key=self.model_key,
                 prompt=prompt_text,
-                system_prompt=self.prompt_manager.json_response_system_prompt(),
+                system_prompt=self.prompt_manager.json_response_system_prompt(sec_ctx),
                 max_tokens=max_tokens,
             )
         except Exception as e:
@@ -136,7 +156,7 @@ class SingleModelAdapter(StrategyAdapter):
 
         state["history"].append({"role": "user", "content": prompt})
         state["history"].append({"role": "assistant", "content": response.text})
-        while len(state["history"]) > 6:
+        while len(state["history"]) > settings.MAX_HISTORY_TURNS:
             state["history"].pop(0)
 
         return {

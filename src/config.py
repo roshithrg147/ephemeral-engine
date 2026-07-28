@@ -29,10 +29,10 @@ class Settings(BaseSettings):
     MODEL_1_OUTPUT_PRICE_PER_1K: float = Field(default=0.0004, ge=0.0)
     MODEL_2_INPUT_PRICE_PER_1K: float = Field(default=0.0005, ge=0.0)
     MODEL_2_OUTPUT_PRICE_PER_1K: float = Field(default=0.0006, ge=0.0)
-    MODEL_CANDIDATE_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
-    MODEL_REFORMULATION_MAX_TOKENS: int = Field(default=2048, ge=1, le=131_072)
-    MODEL_SYNTHESIS_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
-    MODEL_SINGLE_ADAPTER_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
+    MODEL_CANDIDATE_MAX_TOKENS: int = Field(default=16384, ge=1, le=131_072)
+    MODEL_REFORMULATION_MAX_TOKENS: int = Field(default=8192, ge=1, le=131_072)
+    MODEL_SYNTHESIS_MAX_TOKENS: int = Field(default=16384, ge=1, le=131_072)
+    MODEL_SINGLE_ADAPTER_MAX_TOKENS: int = Field(default=16384, ge=1, le=131_072)
 
     # Network Security
     CORS_ORIGINS: list[str] = Field(
@@ -50,8 +50,8 @@ class Settings(BaseSettings):
     GC_TTL_SECONDS: int = Field(default=3600, ge=1)
     GC_INTERVAL_SECONDS: int = Field(default=300, ge=1)
     MAX_ACTIVE_SESSIONS: int = Field(default=1024, ge=1, le=10_000)
-    MAX_HISTORY_TURNS: int = Field(default=6, ge=2, le=100)
-    SESSION_TOKEN_BUDGET: int = Field(default=2500, ge=1)
+    MAX_HISTORY_TURNS: int = Field(default=100, ge=2, le=100)
+    SESSION_TOKEN_BUDGET: int = Field(default=131072, ge=1)
     AUDIT_LOG_PATH: str = "~/.config/anthropic-agent/audit.log"
     CHROMA_EMBEDDING_MODEL: str = "ONNXMiniLM_L6_V2"
     DEVELOPMENT_PHASE: int = 0
@@ -75,8 +75,17 @@ class Settings(BaseSettings):
     DIAGNOSTIC_SCOPE: str = "scevm:diagnostic"
     OPERATOR_SCOPE: str = "scevm:operator"
 
+    # PostgreSQL Database Layer
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = Field(default=5432, ge=1, le=65535)
+    POSTGRES_DB: str = "ephemeral_engine"
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = ""
+    DATABASE_URL: str = ""
+    ASYNC_DATABASE_URL: str = ""
+
     # NVIDIA API Limits
-    NVIDIA_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
+    NVIDIA_MAX_TOKENS: int = Field(default=16384, ge=1, le=131_072)
     NVIDIA_MAX_RETRIES: int = Field(default=3, ge=0, le=10)
     NVIDIA_CONNECT_TIMEOUT_SECONDS: float = Field(default=3.0, ge=0.1, le=60.0)
     NVIDIA_READ_TIMEOUT_SECONDS: float = Field(default=60.0, ge=1.0, le=600.0)
@@ -134,24 +143,24 @@ class Settings(BaseSettings):
                 missing = sorted(name for name, value in required_oidc.items() if not value.strip())
                 if missing:
                     raise ValueError(f"Production OIDC settings missing: {', '.join(missing)}")
-            for name in ("OIDC_ISSUER", "OIDC_JWKS_URL"):
-                parsed = urlparse(required_oidc[name])
-                if parsed.scheme != "https" or not parsed.netloc:
-                    raise ValueError(f"Production {name} must be an absolute HTTPS URL")
-            allowed_algorithms = {
-                "RS256",
-                "RS384",
-                "RS512",
-                "PS256",
-                "PS384",
-                "PS512",
-                "ES256",
-                "ES384",
-                "ES512",
-            }
-            unsupported = sorted(set(self.OIDC_JWT_ALGORITHMS) - allowed_algorithms)
-            if unsupported:
-                raise ValueError(f"Unsafe or unsupported production JWT algorithms: {unsupported}")
+                for name in ("OIDC_ISSUER", "OIDC_JWKS_URL"):
+                    parsed = urlparse(required_oidc[name])
+                    if parsed.scheme != "https" or not parsed.netloc:
+                        raise ValueError(f"Production {name} must be an absolute HTTPS URL")
+                allowed_algorithms = {
+                    "RS256",
+                    "RS384",
+                    "RS512",
+                    "PS256",
+                    "PS384",
+                    "PS512",
+                    "ES256",
+                    "ES384",
+                    "ES512",
+                }
+                unsupported = sorted(set(self.OIDC_JWT_ALGORITHMS) - allowed_algorithms)
+                if unsupported:
+                    raise ValueError(f"Unsafe or unsupported production JWT algorithms: {unsupported}")
             unsafe_origins = [
                 origin
                 for origin in self.CORS_ORIGINS
@@ -164,6 +173,18 @@ class Settings(BaseSettings):
             if self.DIAGNOSTIC_MODE:
                 raise ValueError("Production DIAGNOSTIC_MODE must be disabled")
         return self
+
+    def get_async_database_url(self) -> str:
+        if self.ASYNC_DATABASE_URL:
+            return self.ASYNC_DATABASE_URL
+        password = f":{self.POSTGRES_PASSWORD}" if self.POSTGRES_PASSWORD else ""
+        return f"postgresql+asyncpg://{self.POSTGRES_USER}{password}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+
+    def get_sync_database_url(self) -> str:
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
+        password = f":{self.POSTGRES_PASSWORD}" if self.POSTGRES_PASSWORD else ""
+        return f"postgresql://{self.POSTGRES_USER}{password}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
 
 # Instantiate global settings

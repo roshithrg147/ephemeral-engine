@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Ephemeral Engine Dashboard"
+version = "1.0.0"
+id = "artifacts/engine-dashboard"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22985
+
+[services.development]
+run = "pnpm --filter @workspace/engine-dashboard run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/engine-dashboard", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/engine-dashboard/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22985"
+BASE_PATH = "/"

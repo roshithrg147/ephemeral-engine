@@ -19,19 +19,18 @@ def test_concurrent_session_isolation_and_burn(monkeypatch):
         transport = httpx.ASGITransport(app=app)
 
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            initialized = await asyncio.gather(
-                *[
-                    client.post("/api/session/initialize", json={"session_id": session_id})
-                    for session_id in session_ids
-                ]
-            )
-            assert all(response.status_code == 200 for response in initialized)
+            try:
+                initialized = await asyncio.gather(
+                    *[
+                        client.post("/api/session/initialize", json={"session_id": session_id})
+                        for session_id in session_ids
+                    ]
+                )
+                assert all(response.status_code == 200 for response in initialized)
 
-            writes = []
-            for session_id in session_ids:
-                for message_index in range(messages_per_session):
-                    writes.append(
-                        client.post(
+                for session_id in session_ids:
+                    for message_index in range(messages_per_session):
+                        res_msg = await client.post(
                             "/api/session/message",
                             json={
                                 "session_id": session_id,
@@ -39,45 +38,45 @@ def test_concurrent_session_isolation_and_burn(monkeypatch):
                                 "content": f"{session_id}-message-{message_index}",
                             },
                         )
-                    )
-            written = await asyncio.gather(*writes)
-            assert all(response.status_code == 200 for response in written)
+                        assert res_msg.status_code == 200
 
-            histories = await asyncio.gather(
-                *[client.get(f"/api/session/history/{session_id}") for session_id in session_ids]
-            )
-            for session_id, response in zip(session_ids, histories, strict=True):
-                assert response.status_code == 200
-                contents = {message["content"] for message in response.json()["data"]}
-                assert contents == {
-                    f"{session_id}-message-{message_index}"
-                    for message_index in range(
-                        max(0, messages_per_session - settings.MAX_HISTORY_TURNS),
-                        messages_per_session,
-                    )
-                }
+                histories = await asyncio.gather(
+                    *[client.get(f"/api/session/history/{session_id}") for session_id in session_ids]
+                )
+                for session_id, response in zip(session_ids, histories, strict=True):
+                    assert response.status_code == 200
+                    contents = {message["content"] for message in response.json()["data"]}
+                    assert contents == {
+                        f"{session_id}-message-{message_index}"
+                        for message_index in range(
+                            max(0, messages_per_session - settings.MAX_HISTORY_TURNS),
+                            messages_per_session,
+                        )
+                    }
 
-            burned = await asyncio.gather(
-                *[client.delete(f"/api/session/burn/{session_id}") for session_id in session_ids]
-            )
-            assert all(response.status_code == 200 for response in burned)
+                burned = await asyncio.gather(
+                    *[client.delete(f"/api/session/burn/{session_id}") for session_id in session_ids]
+                )
+                assert all(response.status_code == 200 for response in burned)
 
-            remaining = (await client.get("/api/session/list")).json()["data"]
-            assert not set(session_ids).intersection(remaining)
+                remaining = (await client.get("/api/session/list")).json()["data"]
+                assert not set(session_ids).intersection(remaining)
 
-            reinitialized = await asyncio.gather(
-                *[
-                    client.post("/api/session/initialize", json={"session_id": session_id})
-                    for session_id in session_ids
-                ]
-            )
-            assert all(response.status_code == 200 for response in reinitialized)
-            histories = await asyncio.gather(
-                *[client.get(f"/api/session/history/{session_id}") for session_id in session_ids]
-            )
-            assert all(response.json()["data"] == [] for response in histories)
-            await asyncio.gather(
-                *[client.delete(f"/api/session/burn/{session_id}") for session_id in session_ids]
-            )
+                reinitialized = await asyncio.gather(
+                    *[
+                        client.post("/api/session/initialize", json={"session_id": session_id})
+                        for session_id in session_ids
+                    ]
+                )
+                assert all(response.status_code == 200 for response in reinitialized)
+                histories = await asyncio.gather(
+                    *[client.get(f"/api/session/history/{session_id}") for session_id in session_ids]
+                )
+                assert all(response.json()["data"] == [] for response in histories)
+            finally:
+                await asyncio.gather(
+                    *[client.delete(f"/api/session/burn/{session_id}") for session_id in session_ids],
+                    return_exceptions=True,
+                )
 
     asyncio.run(exercise())

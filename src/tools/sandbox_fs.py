@@ -52,17 +52,20 @@ def _session_root(
     session_id: str,
     *,
     tenant_id: str = "development",
-    owner_subject: str = "development",
+    owner_subject: str = "firebase:dev-firebase-uid",
 ) -> Path:
     """Return an opaque ownership-scoped session root."""
     if not _SESSION_ID_PATTERN.fullmatch(session_id):
         logger.warning("Rejected invalid sandbox session identifier")
         raise SandboxViolation("Invalid session identifier")
 
+    from src.security.principal import IdentityCompatibilityResolver
+
+    canonical_owner = IdentityCompatibilityResolver.normalize_owner_subject(owner_subject)
     sandbox_root = settings.SANDBOX_ROOT.resolve()
     segments = (
         _opaque_segment("tenant", tenant_id),
-        _opaque_segment("subject", owner_subject),
+        _opaque_segment("subject", canonical_owner),
         _opaque_segment("session", session_id),
     )
     current = sandbox_root
@@ -91,7 +94,7 @@ def read_text(
     rel_path: str,
     *,
     tenant_id: str = "development",
-    owner_subject: str = "development",
+    owner_subject: str = "firebase:dev-firebase-uid",
 ) -> str:
     """Read UTF-8 text from a file inside a session sandbox."""
     root = _session_root(session_id, tenant_id=tenant_id, owner_subject=owner_subject)
@@ -109,7 +112,7 @@ def write_text(
     encoding: str = "utf-8",
     mode: int = 0o600,
     tenant_id: str = "development",
-    owner_subject: str = "development",
+    owner_subject: str = "firebase:dev-firebase-uid",
 ) -> None:
     """Write text to a file inside a session sandbox with restrictive permissions."""
     if mode < 0 or mode > 0o777 or mode & 0o002:
@@ -128,7 +131,7 @@ def list_dir(
     rel_dir: str,
     *,
     tenant_id: str = "development",
-    owner_subject: str = "development",
+    owner_subject: str = "firebase:dev-firebase-uid",
 ) -> list[str]:
     """List entry names in a directory inside a session sandbox."""
     root = _session_root(session_id, tenant_id=tenant_id, owner_subject=owner_subject)
@@ -142,7 +145,7 @@ def burn_session(
     session_id: str,
     *,
     tenant_id: str = "development",
-    owner_subject: str = "development",
+    owner_subject: str = "firebase:dev-firebase-uid",
 ) -> SandboxBurnResult:
     """Recursively remove one ownership-scoped filesystem sandbox."""
     sandbox_path = _session_root(
@@ -150,10 +153,12 @@ def burn_session(
         tenant_id=tenant_id,
         owner_subject=owner_subject,
     )
+    print("BURN_SESSION: path=", sandbox_path, "is_dir=", sandbox_path.is_dir())
     if not sandbox_path.is_dir():
         return SandboxBurnResult(existed=False, removed=False)
 
     shutil.rmtree(sandbox_path)
+    print("BURN_SESSION: rmtree complete. Exists now?", sandbox_path.exists())
     for parent in (sandbox_path.parent, sandbox_path.parent.parent):
         try:
             parent.rmdir()

@@ -16,12 +16,15 @@ from pydantic import BaseModel, Field
 
 from src.agent import Action, ActionPayload, RefinedResponse
 from src.config import settings
+from src.exceptions.security import AuthorizationFailure, SessionRecoveryDenied
+from src.exceptions.session import SessionNotInitialized
 from src.memory import session_registry, warm_memory_runtime
 from src.sc_evm import SCEVMEngine
 from src.security import (
     Principal,
     SecurityHeadersMiddleware,
     get_current_principal,
+    require_permission,
     require_scope,
 )
 from src.services.error_handlers import GlobalExceptionHandler
@@ -174,6 +177,8 @@ app.add_exception_handler(Exception, GlobalExceptionHandler.handle)
 
 
 @app.get("/")
+@app.get("/health")
+@app.get("/api/health")
 async def get_health():
     """Health check endpoint for the SC-EVM backend."""
     return {"status": "online", "message": "SC-EVM Backend Engine Running"}
@@ -217,8 +222,9 @@ class StandardResponseEnvelope(BaseModel):
 
 
 @app.get("/api/session/list", response_model=StandardResponseEnvelope)
-async def list_sessions(principal: CurrentPrincipal) -> StandardResponseEnvelope:
+async def list_sessions(request: Request, principal: CurrentPrincipal) -> StandardResponseEnvelope:
     """Retrieves a list of all active session IDs."""
+    require_permission(request, principal, "session:list")
     try:
         session_ids = session_registry.list_session_ids(
             tenant_id=principal.tenant_id,
@@ -236,9 +242,11 @@ async def list_sessions(principal: CurrentPrincipal) -> StandardResponseEnvelope
 @app.post("/api/session/initialize", response_model=StandardResponseEnvelope)
 async def initialize_session(
     body: SessionInitRequest,
+    request: Request,
     principal: CurrentPrincipal,
 ) -> StandardResponseEnvelope:
     """Invokes the session_registry.initialize_session lifecycle logic."""
+    require_permission(request, principal, "session:create")
     try:
         record = await session_registry.initialize_session(
             body.session_id,
@@ -256,7 +264,7 @@ async def initialize_session(
                 )
             },
         )
-    except KeyError as e:
+    except (KeyError, SessionNotInitialized, AuthorizationFailure, SessionRecoveryDenied) as e:
         raise HTTPException(status_code=404, detail="Session not found") from e
     except Exception as e:
         logger.exception("Failed to initialize session", extra={"session_id": body.session_id})
@@ -266,9 +274,11 @@ async def initialize_session(
 @app.post("/api/session/message", response_model=StandardResponseEnvelope)
 async def append_message(
     body: ChatMessageInput,
+    request: Request,
     principal: CurrentPrincipal,
 ) -> StandardResponseEnvelope:
     """Manually synchronizes conversational entries under session-specific sub-locks."""
+    require_permission(request, principal, "session:create")
     try:
         await session_registry.append_message(
             body.session_id,
@@ -280,7 +290,7 @@ async def append_message(
         return StandardResponseEnvelope(
             status="success", message="Message successfully appended to session history"
         )
-    except KeyError as e:
+    except (KeyError, SessionNotInitialized, AuthorizationFailure, SessionRecoveryDenied) as e:
         raise HTTPException(status_code=404, detail="Session not found") from e
     except Exception as e:
         logger.exception("Failed to append message", extra={"session_id": body.session_id})
@@ -292,9 +302,11 @@ async def burn_session(
     session_id: Annotated[
         str, Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
     ],
+    request: Request,
     principal: CurrentPrincipal,
 ) -> StandardResponseEnvelope:
     """Completely purges the volatile RAM footprint and ChromaDB collection for a session."""
+    require_permission(request, principal, "session:burn")
     try:
         flushed = await session_registry.flush_session(
             session_id,
@@ -312,7 +324,7 @@ async def burn_session(
         )
     except HTTPException:
         raise
-    except KeyError as e:
+    except (KeyError, SessionNotInitialized, AuthorizationFailure, SessionRecoveryDenied) as e:
         raise HTTPException(status_code=404, detail="Session not found") from e
     except Exception as e:
         logger.exception("Failed to flush session", extra={"session_id": session_id})
@@ -322,9 +334,11 @@ async def burn_session(
 @app.post("/api/session/burn/{session_id}", status_code=204, response_class=Response)
 async def burn_sandbox_session(
     session_id: Annotated[str, Path()],
+    request: Request,
     principal: CurrentPrincipal,
 ) -> Response:
     """Permanently destroy one session's filesystem sandbox."""
+    require_permission(request, principal, "session:burn")
     try:
         if settings.AUTH_MODE == "oidc":
             record = await session_registry.get_session(
@@ -349,9 +363,11 @@ async def get_session_history(
     session_id: Annotated[
         str, Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
     ],
+    request: Request,
     principal: CurrentPrincipal,
 ) -> StandardResponseEnvelope:
     """Retrieves conversation history for a specific session ID."""
+    require_permission(request, principal, "session:read")
     try:
         record = await session_registry.get_session(
             session_id,
@@ -365,6 +381,8 @@ async def get_session_history(
         )
     except HTTPException:
         raise
+    except (KeyError, SessionNotInitialized, AuthorizationFailure, SessionRecoveryDenied) as e:
+        raise HTTPException(status_code=404, detail="Session not found") from e
     except Exception as e:
         logger.exception("Failed to retrieve history", extra={"session_id": session_id})
         raise HTTPException(status_code=500, detail="Failed to retrieve history") from e
@@ -375,9 +393,11 @@ async def get_session_memory(
     session_id: Annotated[
         str, Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
     ],
+    request: Request,
     principal: CurrentPrincipal,
 ) -> StandardResponseEnvelope:
     """Retrieves index contents and metadata registry for a session."""
+    require_permission(request, principal, "session:read")
     try:
         record = await session_registry.get_session(
             session_id,
@@ -414,6 +434,8 @@ async def get_session_memory(
         )
     except HTTPException:
         raise
+    except (KeyError, SessionNotInitialized, AuthorizationFailure, SessionRecoveryDenied) as e:
+        raise HTTPException(status_code=404, detail="Session not found") from e
     except Exception as e:
         logger.exception("Failed to retrieve memory", extra={"session_id": session_id})
         raise HTTPException(status_code=500, detail="Failed to retrieve memory") from e
@@ -428,22 +450,29 @@ async def sse_query_generator(
     tenant_id: str | None = None,
     owner_subject: str | None = None,
     create_session: bool = True,
+    sec_ctx: Any = None,
 ) -> AsyncIterator[str]:
     """Generates server-sent events for query reformulation, context retrieval, and response content streams."""
-    async with session_registry.session_operation(
-        session_id,
-        create=create_session,
-        tenant_id=tenant_id,
-        owner_subject=owner_subject,
-    ) as record:
-        async for event in _sse_query_generator_locked(
-            record,
+    try:
+        async with session_registry.session_operation(
             session_id,
-            prompt,
-            graphify_enabled,
-            diagnostic_mode,
-        ):
-            yield event
+            create=create_session,
+            tenant_id=tenant_id,
+            owner_subject=owner_subject,
+        ) as record:
+            async for event in _sse_query_generator_locked(
+                record,
+                session_id,
+                prompt,
+                graphify_enabled,
+                diagnostic_mode,
+                sec_ctx=sec_ctx,
+            ):
+                yield event
+    except Exception as e:
+        logger.error(f"SSE stream failed: {e}", exc_info=True)
+        yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
+        yield "event: done\ndata: [DONE]\n\n"
 
 
 async def _sse_query_generator_locked(
@@ -452,8 +481,13 @@ async def _sse_query_generator_locked(
     prompt: str,
     graphify_enabled: bool,
     diagnostic_mode: bool,
+    sec_ctx: Any = None,
 ) -> AsyncIterator[str]:
     """Run one complete query while the session lifecycle lock is held."""
+    if sec_ctx is None:
+        from src.security_context import SecurityContextResolver
+        sec_ctx = SecurityContextResolver.resolve(principal=None, requested_workflow="chat")
+        
     history = list(record.chat_history)
     memory_snapshot = build_memory_snapshot(record, session_id=session_id)
     memory_anchors = record.metadata_registry.get(
@@ -501,19 +535,47 @@ async def _sse_query_generator_locked(
 
     # 3. Retrieve Context & Apply Parallel Context Fusion
     context_str = ""
+    trace = None
     try:
         # Generate query vector locally using the session's ONNX embedding function
         query_vector = await embed_text(record, search_vector_query)
 
+        # Initialize adapters and gateway
+        from src.retrieval.adapters import ChromaVectorStoreAdapter, GraphifyStoreAdapter
+        from src.retrieval.firewall import ModelInputFirewall
+        from src.retrieval.gateway import RetrievalGateway
+        
+        vector_adapter = ChromaVectorStoreAdapter(
+            collection=record.collection,
+            embed_fn=record.embedding_fn,
+            session_id=session_id
+        )
+        graph_adapter = GraphifyStoreAdapter()
+        gateway = RetrievalGateway(
+            vector_store=vector_adapter,
+            graph_store=graph_adapter
+        )
+
         # Evaluate context using parallel retrieval from Vector DB and Graphify
-        context_str = await sc_evm_engine.evaluate_query_context(
+        context_str, trace = await sc_evm_engine.evaluate_query_context(
             query_vector=query_vector,
             collection=record.collection,
             session_id=session_id,
             base_threshold=base_threshold,
             entity_id=search_vector_query,
             graphify_enabled=graphify_enabled,
+            gateway=gateway,
+            tenant_id=sec_ctx.tenant_id,
+            principal_id=sec_ctx.canonical_principal_id,
+            sec_ctx=sec_ctx
         )
+        
+        # Apply Model Input Firewall
+        firewall = ModelInputFirewall()
+        if not firewall.inspect(sec_ctx, trace):
+            logger.warning("ModelInputFirewall rejected the context trace. Clearing context.")
+            context_str = ""
+            
     except Exception as e:
         logger.error(
             "Parallel context retrieval failed",
@@ -687,6 +749,14 @@ async def agent_query(
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Session not found") from exc
+        
+    from src.security_context import SecurityContextResolver
+    sec_ctx = SecurityContextResolver.resolve(
+        principal=principal,
+        request=request,
+        requested_workflow="chat"
+    )
+    
     return StreamingResponse(
         sse_query_generator(
             body.session_id,
@@ -696,6 +766,7 @@ async def agent_query(
             tenant_id=principal.tenant_id,
             owner_subject=principal.subject,
             create_session=False,
+            sec_ctx=sec_ctx,
         ),
         media_type="text/event-stream",
     )
