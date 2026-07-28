@@ -200,12 +200,11 @@ class SCEVMEngine:
         Fuses the retrieved context blocks into a single string payload.
         Returns a tuple of (fused_context_string, ContextTrace).
         """
-        import shutil
-        import asyncio
         import logging
+
         from src.retrieval.gateway import RetrievalRequest
-        from src.workflow_policy import WorkflowClass
         from src.retrieval.trace import ContextTrace
+        from src.workflow_policy import WorkflowClass
 
         logger = logging.getLogger("SC-EVM.Retrieval")
 

@@ -19,6 +19,8 @@ from chromadb.api.models.Collection import Collection
 from filelock import FileLock, Timeout
 
 from src.config import settings
+from src.exceptions.security import AuthorizationFailure, SessionRecoveryDenied
+from src.exceptions.session import SessionNotInitialized
 
 # Telemetry sink for audit compliance
 try:
@@ -358,10 +360,12 @@ class SessionRecord:
         *,
         tenant_id: str = "development",
         owner_subject: str = "development",
+        security_context: Any | None = None,
     ):
         self.session_id: str = session_id
         self.tenant_id: str = tenant_id
         self.owner_subject: str = owner_subject
+        self.security_context: Any | None = security_context
         self.last_accessed: float = time.time()
         self.chat_history: ManifestedHistory = ManifestedHistory(self.refresh_manifest)
         self.state_manifest: StateManifest = StateManifest.from_history(
@@ -481,15 +485,20 @@ class MultiTenantSessionRegistry:
     def _assert_owner(
         session: SessionRecord,
         *,
-        tenant_id: str | None,
-        owner_subject: str | None,
+        tenant_id: str | None = None,
+        owner_subject: str | None = None,
     ) -> None:
         if tenant_id is None and owner_subject is None:
             return
-        if session.tenant_id != tenant_id:
-            raise KeyError(f"Session state context uninitialized: {session.session_id}")
-        if owner_subject is not None and session.owner_subject != owner_subject:
-            raise KeyError(f"Session state context uninitialized: {session.session_id}")
+        if tenant_id is not None and session.tenant_id != tenant_id:
+            raise SessionNotInitialized(session.session_id)
+        if owner_subject is not None:
+            from src.security.principal import IdentityCompatibilityResolver
+
+            norm_session_owner = IdentityCompatibilityResolver.normalize_owner_subject(session.owner_subject)
+            norm_requested_owner = IdentityCompatibilityResolver.normalize_owner_subject(owner_subject)
+            if norm_session_owner != norm_requested_owner:
+                raise SessionNotInitialized(session.session_id)
 
     @asynccontextmanager
     async def _session_scope(
@@ -499,26 +508,47 @@ class MultiTenantSessionRegistry:
         create: bool = False,
         tenant_id: str | None = None,
         owner_subject: str | None = None,
+        workflow: str | None = None,
+        correlation_id: str | None = None,
+        sec_ctx: Any | None = None,
     ):
         lock = self.get_session_lock(session_id)
         async with lock:
             session = self._get_session_unlocked(session_id)
             if session is None:
                 if not create:
-                    raise KeyError(f"Session state context uninitialized: {session_id}")
+                    raise SessionNotInitialized(session_id)
                 await self._evict_capacity_pressure(exclude_session_id=session_id)
                 session = SessionRecord(
                     session_id,
                     tenant_id=tenant_id or "development",
-                    owner_subject=owner_subject or "development",
+                    owner_subject=owner_subject or "firebase:development",
+                    security_context=sec_ctx,
                 )
                 self._sessions[session_id] = session
 
-            self._assert_owner(
-                session,
-                tenant_id=tenant_id,
-                owner_subject=owner_subject,
-            )
+            try:
+                self._assert_owner(
+                    session,
+                    tenant_id=tenant_id,
+                    owner_subject=owner_subject,
+                )
+                if sec_ctx is not None:
+                    session.security_context = sec_ctx
+            except SessionNotInitialized:
+                from src.reliability.recovery_manager import RecoveryManager
+
+                session = await RecoveryManager.reinitialize_session(
+                    session=session,
+                    session_id=session_id,
+                    tenant_id=tenant_id,
+                    owner_subject=owner_subject,
+                    workflow=workflow,
+                    correlation_id=correlation_id,
+                    sec_ctx=sec_ctx,
+                )
+                self._sessions[session_id] = session
+
             session = self._touch_session(session)
             self._guard_session_state(session)
             yield session
@@ -550,6 +580,9 @@ class MultiTenantSessionRegistry:
         create: bool = False,
         tenant_id: str | None = None,
         owner_subject: str | None = None,
+        workflow: str | None = None,
+        correlation_id: str | None = None,
+        sec_ctx: Any | None = None,
     ):
         """Hold a session's lifecycle lock for one complete logical operation."""
         async with self._session_scope(
@@ -557,6 +590,9 @@ class MultiTenantSessionRegistry:
             create=create,
             tenant_id=tenant_id,
             owner_subject=owner_subject,
+            workflow=workflow,
+            correlation_id=correlation_id,
+            sec_ctx=sec_ctx,
         ) as session:
             yield session
 
@@ -578,7 +614,7 @@ class MultiTenantSessionRegistry:
                 owner_subject=owner_subject,
             ) as session:
                 return session
-        except KeyError:
+        except (KeyError, SessionNotInitialized, AuthorizationFailure, SessionRecoveryDenied):
             return None
 
     async def append_message(

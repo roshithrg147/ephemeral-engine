@@ -16,14 +16,16 @@ from pydantic import BaseModel, Field
 
 from src.agent import Action, ActionPayload, RefinedResponse
 from src.config import settings
+from src.exceptions.security import AuthorizationFailure, SessionRecoveryDenied
+from src.exceptions.session import SessionNotInitialized
 from src.memory import session_registry, warm_memory_runtime
 from src.sc_evm import SCEVMEngine
 from src.security import (
     Principal,
     SecurityHeadersMiddleware,
     get_current_principal,
-    require_scope,
     require_permission,
+    require_scope,
 )
 from src.services.error_handlers import GlobalExceptionHandler
 from src.services.model_connector import ModelConnector
@@ -40,8 +42,6 @@ from src.services.session_runtime import (
 from src.strategies.single_model_adapter import SingleModelAdapter
 from src.telemetry_sink import log_error
 from src.tools import sandbox_fs
-from src.exceptions.session import SessionNotInitialized
-from src.exceptions.security import AuthorizationFailure, SessionRecoveryDenied
 
 # Instantiate a global instance of SCEVMEngine containing the NVIDIA client
 sc_evm_engine = SCEVMEngine()
@@ -177,6 +177,8 @@ app.add_exception_handler(Exception, GlobalExceptionHandler.handle)
 
 
 @app.get("/")
+@app.get("/health")
+@app.get("/api/health")
 async def get_health():
     """Health check endpoint for the SC-EVM backend."""
     return {"status": "online", "message": "SC-EVM Backend Engine Running"}
@@ -539,9 +541,9 @@ async def _sse_query_generator_locked(
         query_vector = await embed_text(record, search_vector_query)
 
         # Initialize adapters and gateway
-        from src.retrieval.gateway import RetrievalGateway
         from src.retrieval.adapters import ChromaVectorStoreAdapter, GraphifyStoreAdapter
         from src.retrieval.firewall import ModelInputFirewall
+        from src.retrieval.gateway import RetrievalGateway
         
         vector_adapter = ChromaVectorStoreAdapter(
             collection=record.collection,

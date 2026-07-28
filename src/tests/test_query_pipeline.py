@@ -20,8 +20,15 @@ class FakeEngine:
         )
 
     async def evaluate_query_context(self, **kwargs):
+        from src.retrieval.trace import ContextTrace
+        from src.workflow_policy import WorkflowClass
         self.graphify_values.append(kwargs["graphify_enabled"])
-        return "<retrieved_memory>trusted context</retrieved_memory>"
+        return "<retrieved_memory>trusted context</retrieved_memory>", ContextTrace(
+            correlation_id="test",
+            workflow=WorkflowClass.PUBLIC_CHAT,
+            principal_id="test_principal",
+            query_intent="test_intent"
+        )
 
     @staticmethod
     def check_phase_gate(*_):
@@ -65,7 +72,7 @@ def test_query_pipeline_emits_response_and_commits_state(monkeypatch):
         async def fake_get_orchestrator():
             return FakeOrchestrator()
 
-        async def fake_run_orchestrator(orchestrator, memory_snapshot, prompt):
+        async def fake_run_orchestrator(orchestrator, memory_snapshot, prompt, **kwargs):
             return orchestrator.generate_response(memory_snapshot, prompt)
 
         async def fake_embed_text(record, text):
@@ -126,7 +133,7 @@ def test_failed_query_does_not_commit_empty_history(monkeypatch):
         async def fake_get_orchestrator():
             return FailedOrchestrator()
 
-        async def fake_run_orchestrator(orchestrator, memory_snapshot, prompt):
+        async def fake_run_orchestrator(orchestrator, memory_snapshot, prompt, **kwargs):
             return orchestrator.generate_response(memory_snapshot, prompt)
 
         async def no_documents(record, session_id):
@@ -160,7 +167,7 @@ def test_query_pipeline_emits_degradation_event(monkeypatch):
         async def fake_get_orchestrator():
             return DegradedOrchestrator()
 
-        async def fake_run_orchestrator(orchestrator, memory_snapshot, prompt):
+        async def fake_run_orchestrator(orchestrator, memory_snapshot, prompt, **kwargs):
             return orchestrator.generate_response(memory_snapshot, prompt)
 
         async def no_documents(record, session_id):
@@ -199,7 +206,7 @@ def test_burn_waits_for_in_flight_query_and_prevents_state_resurrection(monkeypa
         async def fake_get_orchestrator():
             return FakeOrchestrator()
 
-        async def blocking_run(orchestrator, memory_snapshot, prompt):
+        async def blocking_run(orchestrator, memory_snapshot, prompt, **kwargs):
             generation_started.set()
             await release_generation.wait()
             return orchestrator.generate_response(memory_snapshot, prompt)

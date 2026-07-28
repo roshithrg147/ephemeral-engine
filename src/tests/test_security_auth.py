@@ -359,3 +359,19 @@ def test_security_headers_are_present() -> None:
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["referrer-policy"] == "no-referrer"
+
+
+def test_health_endpoints_return_200() -> None:
+    async def run() -> list[httpx.Response]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return [
+                await client.get("/"),
+                await client.get("/health"),
+                await client.get("/api/health"),
+            ]
+
+    responses = asyncio.run(run())
+    for resp in responses:
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "online"
