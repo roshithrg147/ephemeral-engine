@@ -190,69 +190,80 @@ class SCEVMEngine:
         base_threshold: float,
         entity_id: str,
         graphify_enabled: bool = True,
-    ) -> str:
+        gateway: Any = None,
+        tenant_id: str = "default",
+        principal_id: str = "system",
+        sec_ctx: Any = None,
+    ) -> tuple[str, Any]:
         """
-        Executes Vector DB search and Graphify lookup in parallel using asyncio.gather.
+        Executes Vector DB search and Graphify lookup via RetrievalGateway.
         Fuses the retrieved context blocks into a single string payload.
+        Returns a tuple of (fused_context_string, ContextTrace).
         """
         import shutil
+        import asyncio
+        import logging
+        from src.retrieval.gateway import RetrievalRequest
+        from src.workflow_policy import WorkflowClass
+        from src.retrieval.trace import ContextTrace
 
-        from src.graphify_bridge import get_structural_context
+        logger = logging.getLogger("SC-EVM.Retrieval")
 
-        def do_vector_search() -> list[str]:
+        if not gateway:
+            logger.warning("No RetrievalGateway provided, returning empty context.")
+            return "", ContextTrace(
+                correlation_id="fallback",
+                workflow=WorkflowClass.PUBLIC_CHAT.value,
+                principal_id=principal_id,
+                query_intent="fallback"
+            )
+
+        def do_gateway_search() -> tuple[str, ContextTrace]:
             try:
-                results = collection.query(
-                    query_embeddings=[query_vector],
-                    n_results=settings.RETRIEVAL_RESULT_LIMIT,
-                    where={"session_id": session_id},
-                    include=["documents", "distances", "embeddings"],
+                request = RetrievalRequest(
+                    query=entity_id,
+                    top_k=settings.RETRIEVAL_RESULT_LIMIT,
+                    requested_namespace="default",
+                    requested_graph_namespace="default" if graphify_enabled else None,
+                    sec_ctx=sec_ctx,
                 )
-                if results and "documents" in results and results["documents"]:
-                    docs = results["documents"][0]
-                    distances = (
-                        results["distances"][0] if "distances" in results else [0.0] * len(docs)
-                    )
-                    embeddings = (
-                        results["embeddings"][0] if "embeddings" in results else [[]] * len(docs)
+                result = gateway.retrieve(
+                    request=request,
+                    workflow=WorkflowClass.PUBLIC_CHAT,
+                    tenant_id=tenant_id,
+                    principal_id=principal_id,
+                )
+
+                if result.retrieval_blocked:
+                    logger.warning(f"Retrieval blocked: {result.blocked_reason}")
+                    return "", result.trace or ContextTrace(
+                        correlation_id="blocked",
+                        workflow=WorkflowClass.PUBLIC_CHAT.value,
+                        principal_id=principal_id,
+                        query_intent="blocked"
                     )
 
-                    return self.filter_documents_via_gating(
-                        query_vector=query_vector,
-                        documents=docs,
-                        distances=distances,
-                        embeddings=embeddings,
-                        base_threshold=base_threshold,
-                    )
+                # Context Fusion
+                fused_context = []
+                for item in result.items:
+                    if item.metadata.get("source_type") == "GRAPHIFY_NODE":
+                        fused_context.append(item.content)
+                    else:
+                        fused_context.append(f"<retrieved_memory>\n{item.content}\n</retrieved_memory>")
+
+                return "\n\n".join(fused_context), result.trace
             except Exception as e:
-                logging.getLogger("SC-EVM.Error").error(
-                    f"Vector DB lookup failed: {e}", exc_info=True
+                logger.error(f"Gateway search failed: {e}", exc_info=True)
+                return "", ContextTrace(
+                    correlation_id="error",
+                    workflow=WorkflowClass.PUBLIC_CHAT.value,
+                    principal_id=principal_id,
+                    query_intent="error"
                 )
-            return []
 
-        def do_graph_lookup() -> str:
-            if not graphify_enabled:
-                return ""
-            if not shutil.which("graphify"):
-                logger = logging.getLogger("SC-EVM.Graphify")
-                logger.info("Graphify CLI not found; skipping structural context retrieval.")
-                return ""
-            return get_structural_context(entity_id)
-
-        # Run both DB queries concurrently in worker threads.
-        vector_task = asyncio.to_thread(do_vector_search)
-        graph_task = asyncio.to_thread(do_graph_lookup)
-
-        vector_docs, graph_context = await asyncio.gather(vector_task, graph_task)
-
-        # Context Fusion
-        fused_context = []
-        if graph_context:
-            fused_context.append(f"<graphify_context>\n{graph_context}\n</graphify_context>")
-
-        for doc in vector_docs:
-            fused_context.append(f"<retrieved_memory>\n{doc}\n</retrieved_memory>")
-
-        return "\n\n".join(fused_context)
+        # Run gateway search in worker thread
+        fused_context, trace = await asyncio.to_thread(do_gateway_search)
+        return fused_context, trace
 
     @staticmethod
     def check_phase_gate(

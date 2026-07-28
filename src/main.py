@@ -564,7 +564,8 @@ async def _sse_query_generator_locked(
             graphify_enabled=graphify_enabled,
             gateway=gateway,
             tenant_id=sec_ctx.tenant_id,
-            principal_id=sec_ctx.canonical_principal_id
+            principal_id=sec_ctx.canonical_principal_id,
+            sec_ctx=sec_ctx
         )
         
         # Apply Model Input Firewall
