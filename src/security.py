@@ -247,6 +247,74 @@ def _unauthorized(reason_code: str) -> HTTPException:
 _FIREBASE_APP_INITIALIZED = False
 
 
+# Development-mode token management (in-memory)
+DEV_ACCESS_TOKEN_TTL = 3600
+DEV_REFRESH_TOKEN_TTL = 7 * 24 * 3600
+_ISSUED_DEV_TOKENS: dict[str, dict] = {}
+
+
+def issue_dev_tokens(email: str) -> tuple[str, str]:
+    now = time.time()
+    access_token = f"development-token-{hashlib.sha256(f'{email}:{now}'.encode('utf-8')).hexdigest()}"
+    refresh_token = f"development-refresh-{hashlib.sha256(f'refresh:{email}:{now}'.encode('utf-8')).hexdigest()}"
+    _ISSUED_DEV_TOKENS[access_token] = {
+        "email": email,
+        "issued_at": now,
+        "access_expires_at": now + DEV_ACCESS_TOKEN_TTL,
+        "refresh_token": refresh_token,
+        "refresh_expires_at": now + DEV_REFRESH_TOKEN_TTL,
+        "revoked": False,
+    }
+    return access_token, refresh_token
+
+
+def _find_by_refresh_token(refresh_token: str) -> tuple[str, dict] | None:
+    for at, meta in list(_ISSUED_DEV_TOKENS.items()):
+        if meta.get("refresh_token") == refresh_token:
+            return at, meta
+    return None
+
+
+def refresh_dev_token(refresh_token: str) -> tuple[str, str] | None:
+    pair = _find_by_refresh_token(refresh_token)
+    if not pair:
+        return None
+    access_token, meta = pair
+    now = time.time()
+    if meta.get("refresh_expires_at", 0) < now or meta.get("revoked"):
+        return None
+    # rotate tokens
+    email = meta.get("email")
+    # revoke old access token
+    meta["revoked"] = True
+    new_access, new_refresh = issue_dev_tokens(email)
+    return new_access, new_refresh
+
+
+def revoke_dev_token(token: str) -> bool:
+    # try access token
+    meta = _ISSUED_DEV_TOKENS.get(token)
+    if meta:
+        meta["revoked"] = True
+        return True
+    # try refresh token
+    pair = _find_by_refresh_token(token)
+    if pair:
+        at, meta = pair
+        meta["revoked"] = True
+        return True
+    return False
+
+
+def validate_dev_access_token(token: str) -> dict | None:
+    meta = _ISSUED_DEV_TOKENS.get(token)
+    if not meta or meta.get("revoked"):
+        return None
+    if meta.get("access_expires_at", 0) < time.time():
+        return None
+    return meta
+
+
 def _init_firebase_app() -> None:
     global _FIREBASE_APP_INITIALIZED
     if _FIREBASE_APP_INITIALIZED:
@@ -308,11 +376,28 @@ async def get_current_principal(
 ) -> Principal:
     """Resolve development identity or verify production OIDC / Firebase bearer token."""
     if settings.AUTH_MODE == "disabled":
-        return Principal(
-            subject="development",
+        # If no credentials provided, return default development principal
+        if credentials is None or credentials.scheme.lower() != "bearer":
+            return Principal(
+                subject="development",
+                tenant_id="development",
+                scopes=frozenset({settings.DIAGNOSTIC_SCOPE, settings.OPERATOR_SCOPE}),
+            )
+
+        # If bearer token present, validate against issued dev tokens
+        token = credentials.credentials
+        meta = validate_dev_access_token(token)
+        if not meta:
+            log_security_event(request, outcome="denied", reason_code="invalid_token")
+            raise _unauthorized("invalid_token")
+
+        principal = Principal(
+            subject=f"dev-{meta.get('email')}",
             tenant_id="development",
             scopes=frozenset({settings.DIAGNOSTIC_SCOPE, settings.OPERATOR_SCOPE}),
         )
+        log_security_event(request, outcome="allowed", reason_code="authenticated", principal=principal)
+        return principal
 
     if credentials is None or credentials.scheme.lower() != "bearer":
         log_security_event(request, outcome="denied", reason_code="missing_bearer")

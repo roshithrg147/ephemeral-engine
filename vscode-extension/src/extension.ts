@@ -401,9 +401,60 @@ class ExtensionRuntime implements vscode.Disposable {
       onDiagnostic: (event, detail) => {
         this.log(event, detail);
       },
+      onAuthFailure: async () => {
+        // Attempt local secret read first
+        const existing = await this.extensionContext.secrets.get(TOKEN_SECRET_KEY);
+        if (existing) return existing;
+
+        // Optional auto-login flow for development mode using backend /api/auth/login
+        const allowAuto = configuration.get<boolean>("autoLogin", true);
+        if (!allowAuto) return null;
+
+        try {
+          const email = configuration.get<string>("defaultEmail", "vscode-extension@local");
+          const resp = await fetch(new URL("/api/auth/login", gateway).toString(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email }),
+          });
+          if (!resp.ok) return null;
+          const payload = await resp.json();
+          const token = payload?.data?.access_token;
+          if (typeof token === "string" && token.length > 0) {
+            await this.extensionContext.secrets.store(TOKEN_SECRET_KEY, token);
+            void vscode.window.showInformationMessage("SC-EVM: obtained development bearer token");
+            return token;
+          }
+        } catch (err) {
+          this.log("auth.autologin.failed", String(err));
+        }
+        return null;
+      },
       ...(bearerToken === undefined ? {} : { bearerToken }),
     });
     return this.client;
+  }
+
+  private async attemptAutoLogin(gateway: URL): Promise<string | null> {
+    const configuration = vscode.workspace.getConfiguration("scevm");
+    const email = configuration.get<string>("defaultEmail", "vscode-extension@local");
+    try {
+      const resp = await fetch(new URL("/api/auth/login", gateway).toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (!resp.ok) return null;
+      const payload = await resp.json();
+      const token = payload?.data?.access_token;
+      if (typeof token === "string" && token.length > 0) {
+        await this.extensionContext.secrets.store(TOKEN_SECRET_KEY, token);
+        return token;
+      }
+    } catch (err) {
+      this.log("auth.autologin.failed", String(err));
+    }
+    return null;
   }
 
   private async burnSession(): Promise<boolean> {

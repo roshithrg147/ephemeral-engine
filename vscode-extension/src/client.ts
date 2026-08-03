@@ -18,6 +18,7 @@ export type ClientOptions = Readonly<{
   developmentPhase: number;
   bearerToken?: string;
   onDiagnostic?: (event: string, detail?: string) => void;
+  onAuthFailure?: () => Promise<string | null>;
 }>;
 
 export class ScevmClient {
@@ -194,6 +195,22 @@ export class ScevmClient {
     try {
       const response = await fetch(url, { ...init, headers, signal });
       this.diagnostic("http.response", `${init.method ?? "GET"} ${url.pathname} ${response.status}`);
+
+      // If unauthorized, allow caller to attempt an auth refresh flow and retry once.
+      if (response.status === 401 && this.options.onAuthFailure) {
+        try {
+          const newToken = await this.options.onAuthFailure();
+          if (newToken) {
+            headers.set("Authorization", `Bearer ${newToken}`);
+            const retry = await fetch(url, { ...init, headers, signal });
+            this.diagnostic("http.response.retry", `${init.method ?? "GET"} ${url.pathname} ${retry.status}`);
+            return retry;
+          }
+        } catch (err) {
+          this.diagnostic("http.auth_refresh.failed", String(err));
+        }
+      }
+
       return response;
     } catch (error: unknown) {
       const reason = error instanceof Error ? error.message : "unknown network error";

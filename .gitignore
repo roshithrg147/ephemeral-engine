@@ -182,6 +182,8 @@ docs/NEXT_SESSION_HANDOFF.md
 
 # uv package manager config
 .uv/
+engine-dashboard/.replit-artifact/
+engine-dashboard/tsconfig.tsbuildinfo
 
 # Exclude documentation / demo files from repo
 PROJECTINSIGHT.md

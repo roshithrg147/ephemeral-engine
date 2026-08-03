@@ -162,16 +162,16 @@ Sources: [pyproject.toml](../pyproject.toml), [uv.lock](../uv.lock), [Dockerfile
 
 ### 3.2 Frontend
 
-The frontend is a client-rendered Create React App application. Exact installed top-level versions are locked in [engine-dashboard/package-lock.json](../engine-dashboard/package-lock.json).
+The frontend is a client-rendered Vite application. Exact installed top-level versions are locked in [engine-dashboard/package-lock.json](../engine-dashboard/package-lock.json).
 
 | Responsibility | Package | Installed version |
 | --- | --- | --- |
-| UI runtime | React / React DOM | `19.2.7` |
-| Routing | react-router-dom | `7.18.0` |
-| Charts | Recharts | `3.9.0` |
-| Icons | lucide-react | `1.21.0` |
-| Build/test harness | react-scripts | `5.0.1` |
-| Styling pipeline | Tailwind CSS | `3.4.19` |
+| UI runtime | React / React DOM | `19.1.0` |
+| Routing | wouter | `3.3.5` |
+| Charts | Recharts | `2.15.2` |
+| Icons | lucide-react | `0.545.0` |
+| Build/test harness | Vite / Vitest | `7.x` / `4.x` |
+| Styling pipeline | Tailwind CSS | `4.1.14` |
 | CSS processing | PostCSS / Autoprefixer | `8.5.15` / `10.5.2` |
 | Component tests | Testing Library React | `16.3.2` |
 
@@ -186,7 +186,7 @@ Sources: [engine-dashboard/package.json](../engine-dashboard/package.json), [Doc
 | `pyproject.toml` | Defines a Hatchling package, installs `src` as the package, excludes tests from wheels, and exposes `assistant = src.cli:main`. Default pytest selection excludes `live` and `network`, preventing accidental provider calls or localhost dependencies. Ruff targets Python 3.11 and excludes generated/evaluation/frontend trees. |
 | `uv.lock` | Provides the reproducible Python dependency graph for `uv sync`. |
 | `engine-dashboard/package-lock.json` | Enables deterministic `npm ci`. |
-| `package.json` Jest mapping | Redirects router imports to concrete distribution files to make the current router package interoperable with the older Jest/toolchain used by `react-scripts`. |
+| `package.json` build/test scripts | Uses Vite build and Vitest run scripts consistent with the current dashboard toolchain. |
 | `tailwind.config.js` | Scans only frontend `src` files; no plugins or theme extension are configured. Most production styling is authored in ordinary CSS variables/classes. |
 | `postcss.config.js` | Runs Tailwind expansion, then vendor prefixing. |
 | `Dockerfile.backend` | Installs the package into a minimal Python image, runs as non-root user `scevm`, and warms the local embedding runtime during image construction. |
@@ -1141,7 +1141,7 @@ Primary implementation evidence:
 - Prompt construction: [src/services/prompt_manager.py](../src/services/prompt_manager.py)
 - Configuration: [src/config.py](../src/config.py)
 - Telemetry: [src/telemetry_sink.py](../src/telemetry_sink.py)
-- Browser lifecycle: [engine-dashboard/src/App.js](../engine-dashboard/src/App.js), [engine-dashboard/src/pages/ChatPage.js](../engine-dashboard/src/pages/ChatPage.js), [engine-dashboard/src/sse.js](../engine-dashboard/src/sse.js)
+- Browser lifecycle: [engine-dashboard/src/App.tsx](../engine-dashboard/src/App.tsx), [engine-dashboard/src/pages/Workspace.tsx](../engine-dashboard/src/pages/Workspace.tsx), [engine-dashboard/src/runtime/apiService.ts](../engine-dashboard/src/runtime/apiService.ts)
 - Terminal lifecycle: [src/cli.py](../src/cli.py)
 - Containers: [docker-compose.yml](../docker-compose.yml), [Dockerfile.backend](../Dockerfile.backend), [Dockerfile.frontend](../Dockerfile.frontend)
 - Evaluation: [src/evidence/runner.py](../src/evidence/runner.py), [src/evidence/live.py](../src/evidence/live.py), [src/evidence/certification.py](../src/evidence/certification.py)

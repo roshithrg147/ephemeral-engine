@@ -372,9 +372,25 @@ class SessionRecord:
         self.chroma_client = _get_shared_chroma_client()
         self.embedding_fn = _get_shared_embedding_function()
 
+        from src.thresholds import get_engine
+
+        engine = get_engine()
+        # perform startup calibration for this session/model if needed
+        try:
+            base_thresh = engine.calibrate_from_anchors(
+                embedding_model=settings.CHROMA_EMBEDDING_MODEL,
+                repository=None,
+                session_id=session_id,
+                embedding_fn=self.embedding_fn,
+                positive_anchors=settings.RETRIEVAL_POSITIVE_ANCHORS,
+                negative_anchors=settings.RETRIEVAL_NEGATIVE_ANCHORS,
+            )
+        except Exception:
+            base_thresh = None
+
         self.metadata_registry: dict[str, Any] = {
             "pending_commit_buffer": [],
-            "base_threshold": float(self._calibrate_threshold()),
+            "base_threshold": float(base_thresh) if base_thresh is not None else None,
             "development_phase": settings.DEVELOPMENT_PHASE,
             "token_budget": settings.SESSION_TOKEN_BUDGET,
         }
@@ -388,41 +404,23 @@ class SessionRecord:
             f"Initialized volatile vector collection space for tenant session: {session_id}"
         )
 
-    def _calibrate_threshold(self) -> float:
-        """Derive a stable semantic threshold, falling back to a safe default."""
-        global _calibrated_threshold
-        if _calibrated_threshold is not None:
-            return _calibrated_threshold
+    def _calibrate_threshold(self) -> float | None:
+        """Deprecated. Use `AdaptiveThresholdEngine` calibration instead."""
+        from src.thresholds import get_engine
+
+        engine = get_engine()
         try:
-            import math
-
-            def cosine_dist(a, b):
-                dot = sum(x * y for x, y in zip(a, b, strict=True))
-                norm_a = math.sqrt(sum(x * x for x in a))
-                norm_b = math.sqrt(sum(x * x for x in b))
-                if norm_a == 0 or norm_b == 0:
-                    return 1.0
-                return 1.0 - (dot / (norm_a * norm_b))
-
-            pos_pairs = self.embedding_fn(["Update configuration", "Modify settings"])
-            neg_pair = self.embedding_fn(["The quick brown fox jumps over the lazy dog"])
-            pos_dist = cosine_dist(pos_pairs[0], pos_pairs[1])
-            neg_dist = cosine_dist(pos_pairs[0], neg_pair[0])
-            dynamic_threshold = pos_dist + (
-                (neg_dist - pos_dist) * settings.RETRIEVAL_CALIBRATION_WEIGHT
+            return engine.calibrate_from_anchors(
+                embedding_model=settings.CHROMA_EMBEDDING_MODEL,
+                repository=None,
+                session_id=self.session_id,
+                embedding_fn=self.embedding_fn,
+                positive_anchors=settings.RETRIEVAL_POSITIVE_ANCHORS,
+                negative_anchors=settings.RETRIEVAL_NEGATIVE_ANCHORS,
             )
-            _calibrated_threshold = max(
-                settings.RETRIEVAL_MIN_DISTANCE_THRESHOLD,
-                min(settings.RETRIEVAL_MAX_DISTANCE_THRESHOLD, dynamic_threshold),
-            )
-        except Exception as e:
-            logger.warning(
-                "Dynamic calibration failed; using configured fallback threshold",
-                exc_info=True,
-            )
-            log_error("memory.session_record.dynamic_calibration", str(e))
-            _calibrated_threshold = settings.RETRIEVAL_BASE_DISTANCE_THRESHOLD
-        return _calibrated_threshold
+        except Exception:
+            log_error("memory.session_record.dynamic_calibration", "calibration_failed")
+            return None
 
     def refresh_manifest(self) -> StateManifest:
         self.state_manifest = StateManifest.from_history(self.session_id, self.chat_history)

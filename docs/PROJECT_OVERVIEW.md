@@ -35,10 +35,10 @@ graph TD
 - **Graphify AST Bridge (`src/agy_scevm.py` & `src/sc_evm.py`)**: Integrates local AST knowledge graphs (2,113 nodes, 3,769 edges across 151 communities) for zero-latency structural code lookups.
 
 ### 2. Control Plane Dashboard (`engine-dashboard/`)
-- **React 18 + Recharts Application**: A modern, high-aesthetics dashboard built with HSL curated themes, glassmorphism layout, and responsive micro-animations.
-- **Navigation & Isolated Contexts Sub-Menu (`src/components/Navigation.js`)**: Features a collapsible sub-menu directly under Workspace for managing isolated sessions with one-click creation (`+ New Context`) and selective session burning.
-- **Real-Time Dynamic Telemetry (`src/App.js`)**: Polling loop syncs active sessions and telemetry every 4 seconds, updating metrics across web chat, VS Code extension, and REST API invocations.
-- **Live SC-EVM Workflow Feed (`src/pages/DashboardPage.js`)**: Provides real-time visibility into internal calls (`[SESSION_INIT]`, `[GRAPHIFY_AST_LOOKUP]`, `[VECTOR_RETRIEVAL]`, `[MODEL_SYNTHESIS]`, `[PHASE_GATE_PASS]`) and engine efficiency metrics.
+- **React 19 + Vite Application**: A modern, high-aesthetics dashboard built with HSL curated themes, glassmorphism layout, and responsive micro-animations.
+- **Navigation & Isolated Contexts Sub-Menu (`src/components/Navigation.tsx`)**: Features a collapsible sub-menu directly under Workspace for managing isolated sessions with one-click creation (`+ New Context`) and selective session burning.
+- **Real-Time Dynamic Telemetry (`src/App.tsx`)**: Polling loop syncs active sessions and telemetry every 4 seconds, updating metrics across web chat, VS Code extension, and REST API invocations.
+- **Live SC-EVM Workflow Feed (`src/pages/Workspace.tsx`)**: Provides real-time visibility into internal calls (`[SESSION_INIT]`, `[GRAPHIFY_AST_LOOKUP]`, `[VECTOR_RETRIEVAL]`, `[MODEL_SYNTHESIS]`, `[PHASE_GATE_PASS]`) and engine efficiency metrics.
 
 ### 3. VS Code Extension (`vscode-extension/`)
 - **TypeScript Extension (`vscode-extension/src/`)**: Connects VS Code workspace to the SC-EVM backend over SSE, injecting active editor context and grounding prompts automatically.

@@ -23,6 +23,9 @@ from src.security import (
     SecurityHeadersMiddleware,
     get_current_principal,
     require_scope,
+    issue_dev_tokens,
+    refresh_dev_token,
+    revoke_dev_token,
 )
 from src.services.error_handlers import GlobalExceptionHandler
 from src.services.model_connector import ModelConnector
@@ -174,9 +177,117 @@ app.add_exception_handler(Exception, GlobalExceptionHandler.handle)
 
 
 @app.get("/")
+@app.get("/api/health")
 async def get_health():
     """Health check endpoint for the SC-EVM backend."""
     return {"status": "online", "message": "SC-EVM Backend Engine Running"}
+
+
+class AuthLoginRequest(BaseModel):
+    email: str
+    password: str | None = None
+
+
+class AuthUser(BaseModel):
+    uid: str
+    email: str
+    display_name: str
+
+
+class AuthLoginResponse(BaseModel):
+    access_token: str
+    refresh_token: str | None = None
+    user: AuthUser
+
+
+class StandardResponseEnvelope(BaseModel):
+    status: str
+    message: str
+    data: Any | None = None
+
+
+# Simple in-memory auth rate limiter (development helper)
+_AUTH_RATE_LIMITS: dict[str, tuple[int, float]] = {}
+AUTH_RATE_LIMIT_WINDOW = 60.0
+AUTH_RATE_LIMIT_MAX = 10
+
+
+
+@app.post("/api/auth/login", response_model=StandardResponseEnvelope)
+async def auth_login(request: Request, body: AuthLoginRequest) -> StandardResponseEnvelope:
+    """Authenticate a development user and return a bearer token in disabled auth mode."""
+    if settings.AUTH_MODE != "disabled":
+        raise HTTPException(
+            status_code=501,
+            detail="Interactive login is only supported in development mode.",
+        )
+
+    # Simple rate limiting per client IP to reduce brute-force risk in dev
+    client_ip = request.client.host if request.client is not None else "unknown"
+    now = time.time()
+    count, window_start = _AUTH_RATE_LIMITS.get(client_ip, (0, now))
+    if now - window_start > AUTH_RATE_LIMIT_WINDOW:
+        count = 0
+        window_start = now
+    if count + 1 > AUTH_RATE_LIMIT_MAX:
+        raise HTTPException(status_code=429, detail="Too many login attempts, try later")
+    _AUTH_RATE_LIMITS[client_ip] = (count + 1, window_start)
+
+    email = body.email.strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+
+    display_name = email.split("@")[0] if "@" in email else email
+    user = AuthUser(
+        uid=f"dev-{display_name}",
+        email=email,
+        display_name=display_name,
+    )
+    access_token, refresh_token = issue_dev_tokens(email)
+
+    return StandardResponseEnvelope(
+        status="success",
+        message="Logged in as development user",
+        data=AuthLoginResponse(access_token=access_token, refresh_token=refresh_token, user=user).dict(),
+    )
+
+
+
+class AuthRefreshRequest(BaseModel):
+    refresh_token: str
+
+
+@app.post("/api/auth/refresh", response_model=StandardResponseEnvelope)
+async def auth_refresh(body: AuthRefreshRequest) -> StandardResponseEnvelope:
+    if settings.AUTH_MODE != "disabled":
+        raise HTTPException(status_code=501, detail="Refresh supported only in development mode")
+    if not body.refresh_token:
+        raise HTTPException(status_code=400, detail="Missing refresh_token")
+    new_pair = refresh_dev_token(body.refresh_token)
+    if not new_pair:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    access_token, refresh_token = new_pair
+    return StandardResponseEnvelope(
+        status="success",
+        message="Token refreshed",
+        data={"access_token": access_token, "refresh_token": refresh_token},
+    )
+
+
+class RevokeRequest(BaseModel):
+    token: str
+
+
+@app.post("/api/auth/revoke", response_model=StandardResponseEnvelope)
+async def auth_revoke(body: RevokeRequest) -> StandardResponseEnvelope:
+    if settings.AUTH_MODE != "disabled":
+        raise HTTPException(status_code=501, detail="Revoke supported only in development mode")
+    if not body.token:
+        raise HTTPException(status_code=400, detail="Missing token")
+    ok = revoke_dev_token(body.token)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Token not found")
+    return StandardResponseEnvelope(status="success", message="Token revoked", data=None)
 
 
 # --- Ingestion Contracts / Schemas ---
@@ -205,12 +316,6 @@ class ExecutionQueryRequest(BaseModel):
     prompt: PromptText
     graphify_enabled: bool = True
     diagnostic_mode: bool = False
-
-
-class StandardResponseEnvelope(BaseModel):
-    status: str
-    message: str
-    data: Any | None = None
 
 
 # --- Network Interface Controllers ---
@@ -403,9 +508,7 @@ async def get_session_memory(
             message="Memory data retrieved successfully",
             data={
                 "pending_commit_buffer": record.metadata_registry.get("pending_commit_buffer", []),
-                "base_threshold": record.metadata_registry.get(
-                    "base_threshold", settings.RETRIEVAL_BASE_DISTANCE_THRESHOLD
-                ),
+                "base_threshold": record.metadata_registry.get("base_threshold"),
                 "token_budget": record.metadata_registry.get(
                     "token_budget", settings.SESSION_TOKEN_BUDGET
                 ),
@@ -460,9 +563,7 @@ async def _sse_query_generator_locked(
         "learned_facts", []
     ) + record.metadata_registry.get("pending_commit_buffer", [])
     pending_mems = list(record.metadata_registry.get("pending_commit_buffer", []))
-    base_threshold = record.metadata_registry.get(
-        "base_threshold", settings.RETRIEVAL_BASE_DISTANCE_THRESHOLD
-    )
+    base_threshold = record.metadata_registry.get("base_threshold")
 
     try:
         docs = await get_indexed_documents(record, session_id)

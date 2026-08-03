@@ -88,14 +88,18 @@ class Settings(BaseSettings):
 
     # Retrieval and dual-anchor distance policy
     RETRIEVAL_RESULT_LIMIT: int = Field(default=3, ge=1, le=100)
-    RETRIEVAL_BASE_DISTANCE_THRESHOLD: float = Field(default=0.52, ge=0.0, le=2.0)
-    RETRIEVAL_ABSOLUTE_DISTANCE_CEILING: float = Field(default=0.48, ge=0.0, le=2.0)
-    RETRIEVAL_ABSOLUTE_DISTANCE_FLOOR: float = Field(default=0.38, ge=0.0, le=2.0)
-    RETRIEVAL_NEIGHBOR_DELTA_LIMIT: float = Field(default=0.12, ge=0.0, le=2.0)
-    RETRIEVAL_TOP_ANCHOR_DELTA_LIMIT: float = Field(default=0.18, ge=0.0, le=2.0)
-    RETRIEVAL_CALIBRATION_WEIGHT: float = Field(default=0.3, ge=0.0, le=1.0)
-    RETRIEVAL_MIN_DISTANCE_THRESHOLD: float = Field(default=0.1, ge=0.0, le=2.0)
-    RETRIEVAL_MAX_DISTANCE_THRESHOLD: float = Field(default=0.9, ge=0.0, le=2.0)
+    RETRIEVAL_BASE_DISTANCE_THRESHOLD: float | None = Field(default=None, ge=0.0, le=2.0)
+    RETRIEVAL_ABSOLUTE_DISTANCE_CEILING: float | None = Field(default=None, ge=0.0, le=2.0)
+    RETRIEVAL_ABSOLUTE_DISTANCE_FLOOR: float | None = Field(default=None, ge=0.0, le=2.0)
+    RETRIEVAL_NEIGHBOR_DELTA_LIMIT: float | None = Field(default=None, ge=0.0, le=2.0)
+    RETRIEVAL_TOP_ANCHOR_DELTA_LIMIT: float | None = Field(default=None, ge=0.0, le=2.0)
+    RETRIEVAL_CALIBRATION_WEIGHT: float | None = Field(default=None, ge=0.0, le=1.0)
+    RETRIEVAL_MIN_DISTANCE_THRESHOLD: float | None = Field(default=None, ge=0.0, le=2.0)
+    RETRIEVAL_MAX_DISTANCE_THRESHOLD: float | None = Field(default=None, ge=0.0, le=2.0)
+    # Calibration store and anchor phrases for startup calibration
+    CALIBRATION_STORE_PATH: str = Field(default=".sc_evm_calibration.json")
+    RETRIEVAL_POSITIVE_ANCHORS: list[str] = Field(default_factory=lambda: ["Update configuration", "Modify settings"])
+    RETRIEVAL_NEGATIVE_ANCHORS: list[str] = Field(default_factory=lambda: ["The quick brown fox jumps over the lazy dog"]) 
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -111,11 +115,20 @@ class Settings(BaseSettings):
             raise ValueError(
                 "NVIDIA_MAX_KEEPALIVE_CONNECTIONS cannot exceed NVIDIA_MAX_CONNECTIONS"
             )
-        if self.RETRIEVAL_MIN_DISTANCE_THRESHOLD > self.RETRIEVAL_MAX_DISTANCE_THRESHOLD:
+        # Only validate bounds when both sides are configured
+        if (
+            self.RETRIEVAL_MIN_DISTANCE_THRESHOLD is not None
+            and self.RETRIEVAL_MAX_DISTANCE_THRESHOLD is not None
+            and self.RETRIEVAL_MIN_DISTANCE_THRESHOLD > self.RETRIEVAL_MAX_DISTANCE_THRESHOLD
+        ):
             raise ValueError(
                 "RETRIEVAL_MIN_DISTANCE_THRESHOLD cannot exceed RETRIEVAL_MAX_DISTANCE_THRESHOLD"
             )
-        if self.RETRIEVAL_ABSOLUTE_DISTANCE_FLOOR > self.RETRIEVAL_ABSOLUTE_DISTANCE_CEILING:
+        if (
+            self.RETRIEVAL_ABSOLUTE_DISTANCE_FLOOR is not None
+            and self.RETRIEVAL_ABSOLUTE_DISTANCE_CEILING is not None
+            and self.RETRIEVAL_ABSOLUTE_DISTANCE_FLOOR > self.RETRIEVAL_ABSOLUTE_DISTANCE_CEILING
+        ):
             raise ValueError(
                 "RETRIEVAL_ABSOLUTE_DISTANCE_FLOOR cannot exceed "
                 "RETRIEVAL_ABSOLUTE_DISTANCE_CEILING"

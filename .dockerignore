@@ -7,7 +7,7 @@
 **/__pycache__
 **/.pytest_cache
 **/node_modules
-engine-dashboard/build
+engine-dashboard/dist
 evaluation-results
 benchmarks
 graphify-out

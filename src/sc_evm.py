@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import math
+import time
 from typing import Any
 
 from src.config import settings
@@ -96,12 +97,15 @@ class SCEVMEngine:
         query_vector: list[float],
         anchor_a: list[float],
         anchor_b: list[float],
-        maximum_admitted_anchor_distance: float = (settings.RETRIEVAL_ABSOLUTE_DISTANCE_CEILING),
+        maximum_admitted_anchor_distance: float | None = None,
     ) -> tuple[float, bool]:
         """Compute the mathematical cosine distance against dual tracking anchor targets to establish structural confidence gating.
 
         Includes standard safe vector-magnitude verification boundaries to isolate against divide-by-zero errors.
         """
+        if maximum_admitted_anchor_distance is None:
+            maximum_admitted_anchor_distance = settings.RETRIEVAL_ABSOLUTE_DISTANCE_CEILING or 1.0
+
         dist_a = SCEVMEngine.cosine_distance(query_vector, anchor_a)
         dist_b = SCEVMEngine.cosine_distance(query_vector, anchor_b)
 
@@ -117,11 +121,11 @@ class SCEVMEngine:
         distances: list[float],
         embeddings: list[list[float]],
         *,
-        base_threshold: float = settings.RETRIEVAL_BASE_DISTANCE_THRESHOLD,
-        absolute_ceiling: float = settings.RETRIEVAL_ABSOLUTE_DISTANCE_CEILING,
-        absolute_floor: float = settings.RETRIEVAL_ABSOLUTE_DISTANCE_FLOOR,
-        neighboring_delta_limit: float = settings.RETRIEVAL_NEIGHBOR_DELTA_LIMIT,
-        top_anchor_delta_limit: float = settings.RETRIEVAL_TOP_ANCHOR_DELTA_LIMIT,
+        base_threshold: float | None = None,
+        absolute_ceiling: float | None = None,
+        absolute_floor: float | None = None,
+        neighboring_delta_limit: float | None = None,
+        top_anchor_delta_limit: float | None = None,
     ) -> list[str]:
         """Filters retrieved documents through the dual-anchor gating rules.
 
@@ -131,8 +135,51 @@ class SCEVMEngine:
         if not documents:
             return []
 
-        # We treat base_threshold as the calibrated maximum admitted cosine distance
-        maximum_admitted_distance = base_threshold
+        stats: dict[str, Any] = {}
+        try:
+            from src.thresholds import get_engine as _get_engine
+
+            _eng = _get_engine()
+            model = settings.CHROMA_EMBEDDING_MODEL
+            stats = _eng.get_stats(model)
+            if absolute_ceiling is None:
+                absolute_ceiling = _eng.get_percentile(model, 90)
+            if absolute_floor is None:
+                absolute_floor = _eng.get_percentile(model, 10)
+            if neighboring_delta_limit is None:
+                configured = settings.RETRIEVAL_NEIGHBOR_DELTA_LIMIT
+                if configured is not None:
+                    neighboring_delta_limit = configured
+                else:
+                    median = stats.get("percentiles", {}).get("50")
+                    p75 = stats.get("percentiles", {}).get("75")
+                    if median is not None and p75 is not None:
+                        neighboring_delta_limit = max(0.0, p75 - median)
+            if top_anchor_delta_limit is None:
+                configured = settings.RETRIEVAL_TOP_ANCHOR_DELTA_LIMIT
+                if configured is not None:
+                    top_anchor_delta_limit = configured
+                else:
+                    median = stats.get("percentiles", {}).get("50")
+                    p90 = stats.get("percentiles", {}).get("90")
+                    if median is not None and p90 is not None:
+                        top_anchor_delta_limit = max(0.0, p90 - median)
+            eng_val = _eng.get_acceptance_threshold(model)
+            maximum_admitted_distance = eng_val if eng_val is not None else base_threshold
+        except Exception:
+            pass
+
+        # Fallbacks when engine/config produced None
+        if absolute_ceiling is None:
+            absolute_ceiling = 1.0
+        if absolute_floor is None:
+            absolute_floor = 0.0
+        if neighboring_delta_limit is None:
+            neighboring_delta_limit = absolute_ceiling
+        if top_anchor_delta_limit is None:
+            top_anchor_delta_limit = absolute_ceiling
+        if maximum_admitted_distance is None:
+            maximum_admitted_distance = absolute_ceiling
 
         matched_docs: list[str] = []
         matched_dists: list[float] = []
@@ -141,8 +188,36 @@ class SCEVMEngine:
         top_dist = distances[0]
         # Absolute ceiling exclusion check (dist > absolute_ceiling -> rejected)
         if top_dist > absolute_ceiling:
+            # emit observability
+            try:
+                import time as _time
+
+                _lat = 0.0
+                _stats = {}
+                from src.thresholds import get_engine as _get_engine
+
+                _eng = _get_engine()
+                _stats = _eng.get_stats(settings.CHROMA_EMBEDDING_MODEL)
+                logger.info(
+                    "retrieval_decision",
+                    extra={
+                        "query": None,
+                        "candidate_count": len(documents),
+                        "accepted_count": 0,
+                        "mean": _stats.get("mean"),
+                        "stddev": _stats.get("stddev"),
+                        "mad": _stats.get("mad"),
+                        "percentiles": _stats.get("percentiles"),
+                        "chosen_threshold": maximum_admitted_distance,
+                        "rejected_threshold": absolute_ceiling,
+                        "latency_ms": _lat,
+                    },
+                )
+            except Exception:
+                pass
             return []
 
+        _start = time.time()
         for doc, dist, emb in zip(documents, distances, embeddings, strict=True):
             if dist > absolute_ceiling:
                 continue
@@ -180,6 +255,31 @@ class SCEVMEngine:
                     matched_dists.append(dist)
                     matched_embs.append(emb)
 
+        _lat = (time.time() - _start) * 1000.0
+        # emit observability
+        try:
+            from src.thresholds import get_engine as _get_engine
+
+            _eng = _get_engine()
+            _stats = _eng.get_stats(settings.CHROMA_EMBEDDING_MODEL)
+            logger.info(
+                "retrieval_decision",
+                extra={
+                    "query": None,
+                    "candidate_count": len(documents),
+                    "accepted_count": len(matched_docs),
+                    "mean": _stats.get("mean"),
+                    "stddev": _stats.get("stddev"),
+                    "mad": _stats.get("mad"),
+                    "percentiles": _stats.get("percentiles"),
+                    "chosen_threshold": maximum_admitted_distance,
+                    "rejected_threshold": absolute_ceiling,
+                    "latency_ms": _lat,
+                },
+            )
+        except Exception:
+            pass
+
         return matched_docs
 
     async def evaluate_query_context(
@@ -187,7 +287,7 @@ class SCEVMEngine:
         query_vector: list[float],
         collection: Any,
         session_id: str,
-        base_threshold: float,
+        base_threshold: float | None,
         entity_id: str,
         graphify_enabled: bool = True,
     ) -> str:
