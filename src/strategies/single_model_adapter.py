@@ -9,7 +9,7 @@ from src.agent import Action, RefinedResponse
 from src.config import settings
 from src.services.model_connector import ModelConnector
 from src.services.prompt_manager import PromptManager
-from src.services.response_parsing import strip_code_fences
+from src.services.response_parsing import clean_structured_response, strip_code_fences
 from src.strategies.base import StrategyAdapter
 
 logger = logging.getLogger("SC-EVM.SingleModelAdapter")
@@ -42,7 +42,7 @@ class SingleModelAdapter(StrategyAdapter):
             return ""
         return "Learned Facts about User:\n" + "\n".join(f"- {fact}" for fact in remembered_facts)
 
-    def _build_prompt(self, prompt: str, session_id: str) -> str:
+    def _build_prompt(self, prompt: str, session_id: str, assistant_mode: str = "coding") -> str:
         state = self._get_state(session_id)
         history = list(state["history"])[-6:]
         history_lines = []
@@ -53,12 +53,20 @@ class SingleModelAdapter(StrategyAdapter):
 
         long_term_context = self._format_long_term_context(state["remembered_facts"])
         history_str = "\n".join(history_lines)
+        
+        mode_instruction = (
+            "GENERAL ASSISTANT MODE (Research & Conceptual Direct Answers):\n"
+            "You are operating in General/Research Assistant Mode. Provide direct, precise, unblocked technical answers, code examples, and research insights.\n\n"
+            if assistant_mode.lower() in ("general", "research")
+            else "CRITICAL RESPONSE RULE:\n"
+            "When the user requests an overview, summary, or review of the project or codebase, you MUST provide a complete, detailed, self-contained response directly in the 'text' field. Do NOT reply with intent-only placeholders like 'Sure, I will retrieve documentation...' without providing the full summary in the 'text' field.\n\n"
+        )
+
         return (
             "You are a single-model orchestration layer for the SC-EVM assistant.\n"
             "Return a strict JSON object with keys: text, intent, action, remember.\n"
             'If no action is needed, set action = {"type": "none", "payload": null}.\n\n'
-            "CRITICAL RESPONSE RULE:\n"
-            "When the user requests an overview, summary, or review of the project or codebase, you MUST provide a complete, detailed, self-contained response directly in the 'text' field. Do NOT reply with intent-only placeholders like 'Sure, I will retrieve documentation...' without providing the full summary in the 'text' field.\n\n"
+            f"{mode_instruction}"
             f"--- LONG TERM CONTEXT ---\n{long_term_context}\n\n"
             f"--- SHORT TERM HISTORY ---\n{history_str}\n\n"
             f"--- USER PROMPT ---\n{prompt}\n"
@@ -91,7 +99,7 @@ class SingleModelAdapter(StrategyAdapter):
             remember = []
 
         return RefinedResponse(
-            text=str(data.get("text", "")).strip(),
+            text=clean_structured_response(str(data.get("text", "")).strip()),
             intent=str(data.get("intent", "chat")),
             action=action_obj,
             remember=[str(item).strip() for item in remember if str(item).strip()],

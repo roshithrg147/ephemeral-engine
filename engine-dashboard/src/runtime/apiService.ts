@@ -40,12 +40,13 @@ export async function fetchSessionList(): Promise<string[]> {
   return res.data || [];
 }
 
-export async function initializeSession(sessionId: string, developmentPhase = 0): Promise<any> {
+export async function initializeSession(sessionId: string, developmentPhase = 0, assistantMode: 'coding' | 'general' = 'coding'): Promise<any> {
   return await customFetch<StandardResponse<any>>('/api/session/initialize', {
     method: 'POST',
     body: JSON.stringify({
       session_id: sessionId,
       development_phase: developmentPhase,
+      assistant_mode: assistantMode,
     }),
   });
 }

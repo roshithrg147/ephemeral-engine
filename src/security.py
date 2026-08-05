@@ -363,6 +363,9 @@ async def verify_firebase_token_async(token: str) -> Principal:
         tenant_id = subject
 
     scopes = _parse_scopes(decoded)
+    if not scopes:
+        scopes = frozenset({settings.DIAGNOSTIC_SCOPE, settings.OPERATOR_SCOPE})
+
     return Principal(
         subject=subject,
         tenant_id=tenant_id,
@@ -384,19 +387,37 @@ async def get_current_principal(
                 scopes=frozenset({settings.DIAGNOSTIC_SCOPE, settings.OPERATOR_SCOPE}),
             )
 
-        # If bearer token present, validate against issued dev tokens
         token = credentials.credentials
-        meta = validate_dev_access_token(token)
-        if not meta:
-            log_security_event(request, outcome="denied", reason_code="invalid_token")
-            raise _unauthorized("invalid_token")
+        # Handle dev tokens issued by /api/auth/login
+        if token.startswith("development-token-") or token.startswith("development-refresh-"):
+            meta = validate_dev_access_token(token)
+            if not meta:
+                log_security_event(request, outcome="denied", reason_code="invalid_token")
+                raise _unauthorized("invalid_token")
 
+            principal = Principal(
+                subject=f"dev-{meta.get('email')}",
+                tenant_id="development",
+                scopes=frozenset({settings.DIAGNOSTIC_SCOPE, settings.OPERATOR_SCOPE}),
+            )
+            log_security_event(request, outcome="allowed", reason_code="authenticated", principal=principal)
+            return principal
+
+        # Try verifying as Firebase ID token
+        try:
+            principal = await verify_firebase_token_async(token)
+            log_security_event(request, outcome="allowed", reason_code="authenticated", principal=principal)
+            return principal
+        except Exception:
+            pass
+
+        # In development mode, fallback to development principal if token is unrecognized
         principal = Principal(
-            subject=f"dev-{meta.get('email')}",
+            subject="development",
             tenant_id="development",
             scopes=frozenset({settings.DIAGNOSTIC_SCOPE, settings.OPERATOR_SCOPE}),
         )
-        log_security_event(request, outcome="allowed", reason_code="authenticated", principal=principal)
+        log_security_event(request, outcome="allowed", reason_code="authenticated_fallback", principal=principal)
         return principal
 
     if credentials is None or credentials.scheme.lower() != "bearer":
@@ -465,3 +486,43 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if settings.DEPLOYMENT_MODE == "production":
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
+
+
+import re
+
+INJECTION_PATTERNS = [
+    re.compile(r"ignore\s+(?:all\s+)?previous\s+instructions", re.IGNORECASE),
+    re.compile(r"system\s+prompt\s+override", re.IGNORECASE),
+    re.compile(r"disregard\s+(?:above|prior)\s+rules", re.IGNORECASE),
+    re.compile(r"you\s+are\n+now\s+in\s+DAN\s+mode", re.IGNORECASE),
+]
+
+
+def sanitize_user_input(text: str) -> str:
+    """Sanitize user input by stripping control characters and null bytes."""
+    if not text or not isinstance(text, str):
+        return ""
+    # Strip non-printable control characters except newline, tab, carriage return
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", "", text)
+    return cleaned.strip()
+
+
+def protect_prompt_assembly(system_prompt: str, user_prompt: str) -> str:
+    """Sanitize and assembly-protect system and user prompt pairs against jailbreaks."""
+    clean_sys = sanitize_user_input(system_prompt)
+    clean_user = sanitize_user_input(user_prompt)
+
+    for pat in INJECTION_PATTERNS:
+        clean_user = pat.sub("[REDACTED_INJECTION_ATTEMPT]", clean_user)
+
+    return f"{clean_sys}\n\nUser Prompt:\n{clean_user}"
+
+
+def protect_context_injection(retrieved_text: str) -> str:
+    """Sanitize retrieved memory context to prevent malicious instructions injection."""
+    clean_text = sanitize_user_input(retrieved_text)
+
+    for pat in INJECTION_PATTERNS:
+        clean_text = pat.sub("[REDACTED_CONTEXT_INJECTION]", clean_text)
+
+    return clean_text

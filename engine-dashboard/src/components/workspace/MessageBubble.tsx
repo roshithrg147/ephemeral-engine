@@ -2,12 +2,15 @@ import React from 'react';
 import { Message } from '../../runtime/types';
 import { AlertTriangle, XCircle, Copy, Check } from 'lucide-react';
 import { StreamingIndicator } from './StreamingIndicator';
+import { FormattedMarkdown } from './FormattedMarkdown';
 
 export function MessageBubble({ message }: { message: Message }) {
   const [copied, setCopied] = React.useState(false);
 
+  const rawText = message.content || message.streamBuffer || '';
+
   const handleCopy = () => {
-    navigator.clipboard.writeText(message.content || message.streamBuffer || '');
+    navigator.clipboard.writeText(rawText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -57,14 +60,14 @@ export function MessageBubble({ message }: { message: Message }) {
         </div>
         
         <div className={`
-          px-4 py-3 rounded-xl border whitespace-pre-wrap text-[14px] leading-relaxed
+          px-4 py-3 rounded-xl border text-[14px] leading-relaxed w-full min-w-[180px]
           ${isUser 
             ? 'bg-message-user-bg text-message-user-fg border-border-default rounded-tr-sm' 
             : 'bg-message-assistant-bg text-message-assistant-fg border-border-subtle rounded-tl-sm shadow-sm'
           }
           ${message.cancelled ? 'opacity-60 line-through' : ''}
         `}>
-          {message.content || message.streamBuffer || (message.streaming && <StreamingIndicator />)}
+          {rawText ? <FormattedMarkdown content={rawText} /> : (message.streaming && <StreamingIndicator />)}
           
           <button 
             onClick={handleCopy}

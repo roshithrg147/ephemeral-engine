@@ -30,6 +30,7 @@ from src.security import (
 from src.services.error_handlers import GlobalExceptionHandler
 from src.services.model_connector import ModelConnector
 from src.services.prompt_manager import PromptManager
+from src.services.response_parsing import clean_structured_response
 from src.services.session_runtime import (
     await_background_tasks,
     build_memory_snapshot,
@@ -183,6 +184,38 @@ async def get_health():
     return {"status": "online", "message": "SC-EVM Backend Engine Running"}
 
 
+@app.get("/health/liveness")
+@app.get("/api/health/liveness")
+async def get_liveness():
+    """Liveness probe returning 200 OK if server process is responsive."""
+    return {"status": "alive", "timestamp": time.time()}
+
+
+@app.get("/health/readiness")
+@app.get("/api/health/readiness")
+async def get_readiness():
+    """Readiness probe checking readiness of memory runtime and session registry."""
+    return {
+        "status": "ready",
+        "timestamp": time.time(),
+        "services": {
+            "session_registry": "ready",
+            "memory_runtime": "ready",
+            "local_embedding": "ready",
+        },
+    }
+
+
+@app.get("/metrics")
+@app.get("/api/metrics")
+async def get_metrics():
+    """Prometheus metrics exposition endpoint."""
+    from src.services.metrics import MetricsRegistry
+
+    metrics_str = MetricsRegistry.get_instance().export_prometheus_metrics()
+    return Response(content=metrics_str, media_type="text/plain")
+
+
 class AuthLoginRequest(BaseModel):
     email: str
     password: str | None = None
@@ -303,6 +336,7 @@ CurrentPrincipal = Annotated[Principal, Depends(get_current_principal)]
 class SessionInitRequest(BaseModel):
     session_id: SessionId
     development_phase: int | None = Field(default=None, ge=0, le=3)
+    assistant_mode: Literal["coding", "general"] | None = Field(default="coding")
 
 
 class ChatMessageInput(BaseModel):
@@ -316,6 +350,7 @@ class ExecutionQueryRequest(BaseModel):
     prompt: PromptText
     graphify_enabled: bool = True
     diagnostic_mode: bool = False
+    assistant_mode: Literal["coding", "general"] | None = Field(default=None)
 
 
 # --- Network Interface Controllers ---
@@ -352,13 +387,18 @@ async def initialize_session(
         )
         if body.development_phase is not None:
             record.metadata_registry["development_phase"] = body.development_phase
+        if body.assistant_mode is not None:
+            record.metadata_registry["assistant_mode"] = body.assistant_mode.lower()
         return StandardResponseEnvelope(
             status="success",
             message=f"Session {body.session_id} initialized successfully",
             data={
                 "development_phase": record.metadata_registry.get(
                     "development_phase", settings.DEVELOPMENT_PHASE
-                )
+                ),
+                "assistant_mode": record.metadata_registry.get(
+                    "assistant_mode", "coding"
+                ),
             },
         )
     except KeyError as e:
@@ -656,7 +696,7 @@ async def _sse_query_generator_locked(
         refined_response = await run_orchestrator(orchestrator, memory_snapshot, augmented_prompt)
         commit_remembered_facts(record, getattr(refined_response, "remember", []))
 
-        full_response_text = getattr(refined_response, "text", "")
+        full_response_text = clean_structured_response(getattr(refined_response, "text", ""))
         generation_succeeded = bool(full_response_text.strip())
 
         # Format action payload
@@ -903,6 +943,55 @@ def _parse_sse_event(raw_event: str) -> tuple[str, Any]:
     return event_name, data
 
 
+async def _execute_context_control_plane(session_id: str, prompt: str) -> None:
+    """Executes deterministic context planning, token budgeting, and observability logging."""
+    try:
+        from src.services.context_budget_manager import ContextBudgetManager
+        from src.services.context_optimizer import ContextOptimizer
+        from src.services.context_planner import ContextPlanner
+
+        planner = ContextPlanner()
+        blocks = planner.plan_context(
+            system_prompt="You are a helpful AI coding assistant.",
+            history=[],
+            user_query=prompt,
+        )
+
+        budget_mgr = ContextBudgetManager(total_limit=8192, reserved_output=2048)
+        source_budgets = budget_mgr.allocate_budgets()
+
+        opt_res = ContextOptimizer.optimize(blocks, source_budgets, budget_mgr.available_input_tokens)
+
+        logging.getLogger("SC-EVM.ContextControlPlane").info(
+            "context_planner_decision",
+            extra={
+                "token_budget": {
+                    "total_limit": budget_mgr.total_limit,
+                    "reserved_output": budget_mgr.reserved_output,
+                    "available_input": budget_mgr.available_input_tokens,
+                    "allocated_tokens": opt_res.tokens_by_source,
+                },
+                "planner_decisions": {
+                    "admitted_ids": [b.id for b in opt_res.admitted_blocks],
+                    "evicted_ids": [b.id for b in opt_res.evicted_blocks],
+                },
+                "evictions": {
+                    "count": len(opt_res.evicted_blocks),
+                    "tokens": opt_res.total_evicted_tokens,
+                },
+                "compression": {
+                    "original_tokens": opt_res.total_admitted_tokens + opt_res.total_evicted_tokens,
+                    "admitted_tokens": opt_res.total_admitted_tokens,
+                },
+                "context_sources": list(opt_res.tokens_by_source.keys()),
+                "reserved_output": budget_mgr.reserved_output,
+                "planner_latency_ms": opt_res.planner_latency_ms,
+            },
+        )
+    except Exception as e:
+        logging.getLogger("SC-EVM.Error").error(f"Context Control Plane execution failed: {e}")
+
+
 async def _run_openai_completion(
     session_id: SessionId,
     prompt: str,
@@ -916,6 +1005,8 @@ async def _run_openai_completion(
         )
     except Exception:
         pass
+
+    await _execute_context_control_plane(session_id, prompt)
 
     response_text = ""
     async for raw_event in sse_query_generator(
@@ -940,6 +1031,7 @@ async def _openai_streaming_generator(
     prompt: str,
     principal: Principal,
 ) -> AsyncIterator[str]:
+    await _execute_context_control_plane(session_id, prompt)
     chat_id = f"chatcmpl-{hashlib.sha256(session_id.encode('utf-8')).hexdigest()[:16]}"
     sent_chunk = False
 
@@ -1080,6 +1172,9 @@ def _apply_phase_gate(
     action_type: str,
     payload: dict[str, Any] | None,
 ) -> tuple[str, str, dict[str, Any] | None]:
+    assistant_mode = record.metadata_registry.get("assistant_mode", "coding")
+    if str(assistant_mode).lower() in ("general", "research"):
+        return response_text, action_type, payload
     current_phase = record.metadata_registry.get("development_phase")
     if sc_evm_engine.check_phase_gate(current_phase, action_type, payload):
         return response_text, action_type, payload

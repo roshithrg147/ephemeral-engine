@@ -1,7 +1,7 @@
 export function parseSSEChunk(raw: string) {
   if (!raw) return [];
   const chunks = raw.split('\n\n');
-  const events = [];
+  const events: any[] = [];
   
   for (const chunk of chunks) {
     if (!chunk.trim()) continue;

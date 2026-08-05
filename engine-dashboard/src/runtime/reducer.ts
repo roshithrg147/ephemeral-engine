@@ -28,6 +28,7 @@ export const initialState: RuntimeState = {
   lastSubmitError: null,
   
   inspectorOpen: false,
+  sessionRailOpen: true,
   inspectorTab: 'context',
   eventFilter: 'all',
   themeMode: 'dark',
@@ -96,6 +97,19 @@ export function runtimeReducer(state: RuntimeState, action: RuntimeAction): Runt
 
     case 'SESSION_SELECTED':
       return { ...state, activeSessionId: action.sessionId };
+
+    case 'SESSION_MODE_TOGGLED':
+      if (!state.sessions[action.sessionId]) return state;
+      return {
+        ...state,
+        sessions: {
+          ...state.sessions,
+          [action.sessionId]: {
+            ...state.sessions[action.sessionId],
+            assistantMode: action.mode,
+          },
+        },
+      };
 
     case 'SESSION_TIER_UPDATED':
       if (!state.sessions[action.sessionId]) return state;
@@ -276,6 +290,9 @@ export function runtimeReducer(state: RuntimeState, action: RuntimeAction): Runt
 
     case 'INSPECTOR_TOGGLE':
       return { ...state, inspectorOpen: !state.inspectorOpen };
+
+    case 'SESSION_RAIL_TOGGLE':
+      return { ...state, sessionRailOpen: state.sessionRailOpen === undefined ? false : !state.sessionRailOpen };
 
     case 'INSPECTOR_TAB_CHANGED':
       return { ...state, inspectorTab: action.tab };

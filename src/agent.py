@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from src.config import settings
 from src.services.model_connector import ModelConnector
 from src.services.prompt_manager import PromptManager
-from src.services.response_parsing import strip_code_fences
+from src.services.response_parsing import clean_structured_response, strip_code_fences
 
 logger = logging.getLogger("SC-EVM.Agent")
 _MODEL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
@@ -288,6 +288,7 @@ class AgentOrchestrator:
             text_clean = strip_code_fences(response_text)
             data = json.loads(text_clean)
             refined = RefinedResponse(**data)
+            refined.text = clean_structured_response(refined.text)
             records.append(
                 self._usage_record(
                     stage="model_2_synthesis",

@@ -165,7 +165,7 @@ class SCEVMEngine:
                     if median is not None and p90 is not None:
                         top_anchor_delta_limit = max(0.0, p90 - median)
             eng_val = _eng.get_acceptance_threshold(model)
-            maximum_admitted_distance = eng_val if eng_val is not None else base_threshold
+            maximum_admitted_distance = base_threshold if base_threshold is not None else eng_val
         except Exception:
             pass
 
@@ -179,7 +179,7 @@ class SCEVMEngine:
         if top_anchor_delta_limit is None:
             top_anchor_delta_limit = absolute_ceiling
         if maximum_admitted_distance is None:
-            maximum_admitted_distance = absolute_ceiling
+            maximum_admitted_distance = 0.45
 
         matched_docs: list[str] = []
         matched_dists: list[float] = []
@@ -290,16 +290,27 @@ class SCEVMEngine:
         base_threshold: float | None,
         entity_id: str,
         graphify_enabled: bool = True,
+        query_text: str = "",
     ) -> str:
-        """
-        Executes Vector DB search and Graphify lookup in parallel using asyncio.gather.
-        Fuses the retrieved context blocks into a single string payload.
+        """Executes Hybrid Semantic (Vector), Lexical (BM25), and Structural (AST) retrieval.
+
+        Fuses candidates using RetrievalFusionEngine based on prompt intent routing.
         """
         import shutil
 
         from src.graphify_bridge import get_structural_context
+        from src.services.ast_indexer import ASTIndexer
+        from src.services.bm25_indexer import BM25Indexer
+        from src.services.fusion_engine import RetrievalFusionEngine
+        from src.services.intent_router import IntentRouter
 
-        def do_vector_search() -> list[str]:
+        query_str = query_text or entity_id or ""
+        intent = IntentRouter.classify_intent(query_str)
+        requires_ast = IntentRouter.requires_structural_ast(intent)
+        start_time = time.perf_counter()
+
+        # Pipeline 1: Semantic Vector Search
+        def do_semantic_search() -> tuple[list[dict[str, Any]], list[str]]:
             try:
                 results = collection.query(
                     query_embeddings=[query_vector],
@@ -316,41 +327,140 @@ class SCEVMEngine:
                         results["embeddings"][0] if "embeddings" in results else [[]] * len(docs)
                     )
 
-                    return self.filter_documents_via_gating(
+                    filtered_docs = self.filter_documents_via_gating(
                         query_vector=query_vector,
                         documents=docs,
                         distances=distances,
                         embeddings=embeddings,
                         base_threshold=base_threshold,
                     )
+                    cands = [
+                        {"doc_id": f"sem-{idx}", "text": doc, "metadata": {"source": "vector"}}
+                        for idx, doc in enumerate(filtered_docs)
+                    ]
+                    return cands, filtered_docs
             except Exception as e:
                 logging.getLogger("SC-EVM.Error").error(
                     f"Vector DB lookup failed: {e}", exc_info=True
                 )
-            return []
+            return [], []
 
-        def do_graph_lookup() -> str:
-            if not graphify_enabled:
-                return ""
-            if not shutil.which("graphify"):
-                logger = logging.getLogger("SC-EVM.Graphify")
-                logger.info("Graphify CLI not found; skipping structural context retrieval.")
-                return ""
-            return get_structural_context(entity_id)
+        # Pipeline 2: Lexical BM25 Search
+        def do_lexical_search() -> list[dict[str, Any]]:
+            try:
+                bm25 = BM25Indexer()
+                # Synchronize sample memory text into lexical index
+                if collection and hasattr(collection, "get"):
+                    existing = collection.get(where={"session_id": session_id}, include=["documents"])
+                    if existing and "documents" in existing and existing["documents"]:
+                        for idx, d_text in enumerate(existing["documents"]):
+                            bm25.add_document(f"mem-{idx}", d_text)
+                bm25_results = bm25.search(query_str, top_k=settings.RETRIEVAL_RESULT_LIMIT)
+                return [
+                    {
+                        "doc_id": r.doc_id,
+                        "text": r.text,
+                        "score": r.score,
+                        "metadata": {"source": "bm25"},
+                    }
+                    for r in bm25_results
+                ]
+            except Exception as e:
+                logging.getLogger("SC-EVM.Error").error(f"BM25 lookup failed: {e}")
+                return []
 
-        # Run both DB queries concurrently in worker threads.
-        vector_task = asyncio.to_thread(do_vector_search)
-        graph_task = asyncio.to_thread(do_graph_lookup)
+        # Pipeline 3: Structural AST & Graph Lookup (Intent-Gated)
+        def do_structural_search() -> tuple[list[dict[str, Any]], str]:
+            ast_candidates: list[dict[str, Any]] = []
+            graph_text = ""
 
-        vector_docs, graph_context = await asyncio.gather(vector_task, graph_task)
+            if not requires_ast:
+                return [], ""
 
-        # Context Fusion
+            try:
+                ast_idx = ASTIndexer()
+                ast_res = ast_idx.search_symbols(query_str, top_k=settings.RETRIEVAL_RESULT_LIMIT)
+                ast_candidates = [
+                    {
+                        "doc_id": f"ast-{res.symbol.file_path}:{res.symbol.line_number}",
+                        "text": f"{res.symbol.signature} (File: {res.symbol.file_path}:L{res.symbol.line_number})",
+                        "metadata": {"source": "ast", "symbol_type": res.symbol.symbol_type},
+                    }
+                    for res in ast_res
+                ]
+            except Exception as e:
+                logging.getLogger("SC-EVM.Error").error(f"AST search failed: {e}")
+
+            if graphify_enabled and shutil.which("graphify"):
+                try:
+                    graph_text = get_structural_context(entity_id)
+                except Exception:
+                    graph_text = ""
+            elif graphify_enabled:
+                logging.getLogger("SC-EVM.Graphify").info(
+                    "Graphify CLI not found; skipping structural context retrieval."
+                )
+
+            return ast_candidates, graph_text
+
+        # Execute pipelines concurrently
+        sem_task = asyncio.to_thread(do_semantic_search)
+        lex_task = asyncio.to_thread(do_lexical_search)
+        struct_task = asyncio.to_thread(do_structural_search)
+
+        (sem_cands, sem_filtered_docs), lex_cands, (struct_cands, graph_context) = (
+            await asyncio.gather(sem_task, lex_task, struct_task)
+        )
+
+        # Retrieval Fusion via RRF
+        fusion_engine = RetrievalFusionEngine()
+        fused_results, fusion_lat = fusion_engine.fuse(
+            sem_cands,
+            lex_cands,
+            struct_cands if requires_ast else [],
+            limit=settings.RETRIEVAL_RESULT_LIMIT,
+        )
+
+        total_lat = (time.perf_counter() - start_time) * 1000.0
+
+        # Structured Observability Telemetry
+        retrievers_used = ["semantic", "lexical"]
+        if requires_ast:
+            retrievers_used.append("structural")
+
+        logging.getLogger("SC-EVM.Fusion").info(
+            "hybrid_retrieval_fusion",
+            extra={
+                "query": query_str,
+                "intent": intent,
+                "retrievers_used": retrievers_used,
+                "fusion_weights": {
+                    "semantic": fusion_engine.semantic_weight,
+                    "lexical": fusion_engine.lexical_weight,
+                    "structural": fusion_engine.structural_weight if requires_ast else 0.0,
+                },
+                "candidate_counts": {
+                    "semantic": len(sem_cands),
+                    "lexical": len(lex_cands),
+                    "structural": len(struct_cands),
+                },
+                "fusion_latency_ms": fusion_lat,
+                "retrieval_latency_ms": total_lat,
+                "chosen_evidence": [cand.text[:80] for cand in fused_results],
+            },
+        )
+
+        # Build fused context block
         fused_context = []
         if graph_context:
             fused_context.append(f"<graphify_context>\n{graph_context}\n</graphify_context>")
 
-        for doc in vector_docs:
-            fused_context.append(f"<retrieved_memory>\n{doc}\n</retrieved_memory>")
+        if fused_results:
+            for cand in fused_results:
+                fused_context.append(f"<retrieved_memory>\n{cand.text}\n</retrieved_memory>")
+        else:
+            for doc in sem_filtered_docs:
+                fused_context.append(f"<retrieved_memory>\n{doc}\n</retrieved_memory>")
 
         return "\n\n".join(fused_context)
 

@@ -13,6 +13,9 @@ You must return your output strictly as a valid raw JSON object with two keys: "
 {lt_context}
 Provide clear, helpful, and technically accurate responses. Keep terminal context in mind.
 
+RESPONSE FORMATTING RULE:
+Present all responses, schedules, roadmaps, and multi-step plans as clean, structured chat text. Do NOT use raw markdown tables, pipe characters ('|'), or non-standard hyphens. Use clean headings, bold text, and bulleted/numbered lists to structure content.
+
 WORKSPACE EVIDENCE RULE:
 A file inventory proves only that paths exist. Never infer dependencies, architecture, implementation state, or file contents from names alone. When exact evidence is missing, request list_files or read_file through the structured action. Never ask the user to run commands or paste output.
 
@@ -27,15 +30,16 @@ You have received two responses to the user's prompt:
 Your task is to:
 1. Analyze both responses, weigh their facts, style, and correctness.
 2. Produce a single refined response in the `text` field. It should combine the strengths of both (reasoning/eloquence, structured details) and resolve any conflicts. Keep it friendly and concise.
-3. Determine the user's `intent` (chat, command, image_generation, file, help, exit).
-4. Decide if the query requires an automated `action` on the user's system:
+3. Present all responses, schedules, roadmaps, and multi-step plans in the `text` field as clean, structured chat text. Do NOT use raw markdown tables, pipe characters ('|'), or non-standard hyphens. Use clean headings, bold text, and bulleted/numbered lists.
+4. Determine the user's `intent` (chat, command, image_generation, file, help, exit).
+5. Decide if the query requires an automated `action` on the user's system:
    - 'list_files': when repository inventory is missing or more paths are needed. Optional action.payload.glob and action.payload.max_results.
    - 'read_file': when exact workspace file contents are needed. Put one workspace-relative path in action.payload.file_path.
    - 'save_file': if the user wants to write a file. Put the path in action.payload.file_path and content in action.payload.file_content.
    - 'none': if no action is needed.
 Never ask the user to run terminal commands or paste directory listings. Use list_files or read_file. Never request secrets, .env files, credentials, private keys, dependency vendor trees, or build output.
 File inventory proves only path existence. Never claim file contents, dependencies, architecture, or implementation state without supplied content. For repository reviews, use read_file until evidence supports the plan. Keep the final review concise.
-5. Extract any new facts about the user (e.g. name, preferences, project layout) to permanently remember in the `remember` list. Do NOT repeat facts already present in the User Profile Context or Learned Facts.
+6. Extract any new facts about the user (e.g. name, preferences, project layout) to permanently remember in the `remember` list. Do NOT repeat facts already present in the User Profile Context or Learned Facts.
 
 REQUIRED OUTPUT SHAPE:
 {{"text":"user-facing response","intent":"file","action":{{"type":"read_file","payload":{{"file_path":"relative/path"}}}},"remember":[]}}
@@ -77,8 +81,21 @@ If the user requests code generation for UI, frontend, or feature components, yo
         return f"Conversation History:\n{history_str}\n\nCurrent User Prompt: {current_input}"
 
     @classmethod
-    def build_orchestrator_system_prompt(cls, long_term_context: str) -> str:
-        return cls.ORCHESTRATOR_SYSTEM_PROMPT.format(lt_context=long_term_context)
+    def build_orchestrator_system_prompt(cls, long_term_context: str, assistant_mode: str = "coding") -> str:
+        prompt = cls.ORCHESTRATOR_SYSTEM_PROMPT.format(lt_context=long_term_context)
+        if assistant_mode.lower() in ("general", "research"):
+            gating_text = (
+                "CRITICAL PHASE GATING RULE (Architect-First):\n"
+                "If the user requests code generation for UI, frontend, or feature components, you must verify if the \"database foundation\" or backend schema has been established. "
+                "If the database foundation is NOT established in the context, you MUST REFUSE the request. You must state that you cannot proceed with UI/feature code until the database foundation is built."
+            )
+            general_text = (
+                "GENERAL ASSISTANT MODE (Research & Conceptual Direct Answers):\n"
+                "You are operating in General/Research Assistant Mode. Omit strict database phase locks for exploratory inquiries. "
+                "Provide direct, precise, unblocked technical answers, code examples, architectural reviews, and research responses to queries."
+            )
+            prompt = prompt.replace(gating_text, general_text)
+        return prompt
 
     @classmethod
     def build_synthesis_prompt(
@@ -88,13 +105,26 @@ If the user requests code generation for UI, frontend, or feature components, yo
         user_prompt: str,
         model_2_response: str,
         model_1_response: str,
+        assistant_mode: str = "coding",
     ) -> str:
-        return cls.SYNTHESIS_SYSTEM_PROMPT.format(
+        prompt = cls.SYNTHESIS_SYSTEM_PROMPT.format(
             lt_context=long_term_context,
             user_prompt=user_prompt,
             model_2_response=model_2_response,
             model_1_response=model_1_response,
         )
+        if assistant_mode.lower() in ("general", "research"):
+            gating_text = (
+                "CRITICAL PHASE GATING RULE (Architect-First):\n"
+                "If the user requests code generation for UI, frontend, or feature components, you must verify if the \"database foundation\" or backend schema has been established in the context. "
+                "If NOT, you MUST REFUSE the request and state that you cannot proceed with UI/feature code until the database foundation is built. Even if one of the models provided code, DO NOT output it."
+            )
+            general_text = (
+                "GENERAL ASSISTANT MODE (Research & Conceptual Direct Answers):\n"
+                "You are operating in General/Research Assistant Mode. You may answer technical questions, explain concepts, provide research insights, compare libraries, and assist with queries directly without requiring pre-established database schema foundations."
+            )
+            prompt = prompt.replace(gating_text, general_text)
+        return prompt
 
     @classmethod
     def build_augmented_prompt(cls, *, context_str: str, grounded_llm_prompt: str) -> str:

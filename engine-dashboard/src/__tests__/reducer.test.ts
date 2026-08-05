@@ -77,4 +77,12 @@ describe('Runtime Reducer', () => {
     expect(state.pendingBurnSessionId).toBeNull();
     expect(state.sessions.s1.tier).toBe('healthy'); // unchanged
   });
+
+  it('handles SESSION_RAIL_TOGGLE', () => {
+    let state = runtimeReducer(initialState, { type: 'SESSION_RAIL_TOGGLE' });
+    expect(state.sessionRailOpen).toBe(false);
+
+    state = runtimeReducer(state, { type: 'SESSION_RAIL_TOGGLE' });
+    expect(state.sessionRailOpen).toBe(true);
+  });
 });

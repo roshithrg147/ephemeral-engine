@@ -14,10 +14,11 @@ export function Workspace() {
     const searchParams = new URLSearchParams(window.location.search);
     const sessionId = searchParams.get('session');
     
-    if (sessionId && state.sessions[sessionId] && state.activeSessionId !== sessionId) {
+    const hasSession = sessionId ? Boolean(state.sessions[sessionId]) : false;
+    if (sessionId && hasSession && state.activeSessionId !== sessionId) {
       dispatch({ type: 'SESSION_SELECTED', sessionId });
     }
-  }, [dispatch, state.sessions, state.activeSessionId]);
+  }, [dispatch, state.activeSessionId]);
 
   return (
     <div className="h-full flex flex-col md:flex-row overflow-hidden relative">

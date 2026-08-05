@@ -53,6 +53,7 @@ export interface Message {
 export interface Session {
   id: string;
   name: string;
+  assistantMode?: 'coding' | 'general';
   createdAt: number;
   expiresAt: number;
   tier: SessionTier;
@@ -100,6 +101,7 @@ export interface RuntimeState {
   lastSubmitError: string | null;
   
   inspectorOpen: boolean;
+  sessionRailOpen?: boolean;
   inspectorTab: 'context' | 'events';
   eventFilter: EventType | 'all';
   themeMode: 'dark' | 'light';
@@ -129,8 +131,10 @@ export type RuntimeAction =
   | { type: 'COMPOSER_SUBMIT_FAILED'; error: string }
   | { type: 'COMPOSER_SUBMIT_SUCCEEDED' }
   | { type: 'INSPECTOR_TOGGLE' }
+  | { type: 'SESSION_RAIL_TOGGLE' }
   | { type: 'INSPECTOR_TAB_CHANGED'; tab: 'context' | 'events' }
   | { type: 'EVENT_FILTER_CHANGED'; filter: EventType | 'all' }
   | { type: 'PENDING_BURN_SET'; sessionId: string | null }
   | { type: 'THEME_TOGGLED' }
+  | { type: 'SESSION_MODE_TOGGLED'; sessionId: string; mode: 'coding' | 'general' }
   | { type: 'MODEL_RETRY_TICK' };

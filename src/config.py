@@ -8,6 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
     # API Keys
     NVIDIA_API_KEY: str = ""
 
@@ -30,7 +34,7 @@ class Settings(BaseSettings):
     MODEL_2_INPUT_PRICE_PER_1K: float = Field(default=0.0005, ge=0.0)
     MODEL_2_OUTPUT_PRICE_PER_1K: float = Field(default=0.0006, ge=0.0)
     MODEL_CANDIDATE_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
-    MODEL_REFORMULATION_MAX_TOKENS: int = Field(default=2048, ge=1, le=131_072)
+    MODEL_REFORMULATION_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
     MODEL_SYNTHESIS_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
     MODEL_SINGLE_ADAPTER_MAX_TOKENS: int = Field(default=4096, ge=1, le=131_072)
 
@@ -99,9 +103,13 @@ class Settings(BaseSettings):
     # Calibration store and anchor phrases for startup calibration
     CALIBRATION_STORE_PATH: str = Field(default=".sc_evm_calibration.json")
     RETRIEVAL_POSITIVE_ANCHORS: list[str] = Field(default_factory=lambda: ["Update configuration", "Modify settings"])
-    RETRIEVAL_NEGATIVE_ANCHORS: list[str] = Field(default_factory=lambda: ["The quick brown fox jumps over the lazy dog"]) 
+    RETRIEVAL_NEGATIVE_ANCHORS: list[str] = Field(default_factory=lambda: ["The quick brown fox jumps over the lazy dog"])
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # Phase 2 Hybrid Retrieval Fusion Weights and AST settings
+    FUSION_SEMANTIC_WEIGHT: float = Field(default=0.5, ge=0.0, le=1.0)
+    FUSION_LEXICAL_WEIGHT: float = Field(default=0.3, ge=0.0, le=1.0)
+    FUSION_STRUCTURAL_WEIGHT: float = Field(default=0.2, ge=0.0, le=1.0)
+    AST_CACHE_DIR: str = Field(default=".ast_cache")
 
     @field_validator("AUDIT_LOG_PATH")
     @classmethod
