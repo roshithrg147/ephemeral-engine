@@ -31,7 +31,7 @@ def _append_audit_entry(entry: dict) -> None:
             audit_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def log_interaction(session_id: str, role: str, content: str) -> None:
+def log_interaction(session_id: str, role: str, content: str, *, tenant_id: str = "development", owner_subject: str = "development") -> None:
     """Appends interaction events to a secure, immutable audit datastore.
     This runs in parallel to the volatile session storage and ensures that
     even if a session is burned, compliance logs are retained.
@@ -49,6 +49,8 @@ def log_interaction(session_id: str, role: str, content: str) -> None:
         _append_audit_entry(
             {
                 "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                "tenant_id": tenant_id,
+                "owner_subject": owner_subject,
                 "session_id": session_id,
                 "role": role,
                 "content": logged_content,

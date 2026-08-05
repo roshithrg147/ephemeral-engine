@@ -190,8 +190,6 @@ class SCEVMEngine:
         if top_dist > absolute_ceiling:
             # emit observability
             try:
-                import time as _time
-
                 _lat = 0.0
                 _stats = {}
                 from src.thresholds import get_engine as _get_engine
@@ -291,6 +289,7 @@ class SCEVMEngine:
         entity_id: str,
         graphify_enabled: bool = True,
         query_text: str = "",
+        memory_config: dict[str, Any] | None = None,
     ) -> str:
         """Executes Hybrid Semantic (Vector), Lexical (BM25), and Structural (AST) retrieval.
 
@@ -306,7 +305,18 @@ class SCEVMEngine:
 
         query_str = query_text or entity_id or ""
         intent = IntentRouter.classify_intent(query_str)
+        
+        memory_config = memory_config or {}
+        retrieval_depth = memory_config.get("retrieval_depth", "full")
+        if retrieval_depth == "minimal":
+            return ""
+            
         requires_ast = IntentRouter.requires_structural_ast(intent)
+        if not memory_config.get("use_architecture", True):
+            requires_ast = False
+            
+        use_project_memory = memory_config.get("use_project_memory", True)
+        
         start_time = time.perf_counter()
 
         # Pipeline 1: Semantic Vector Search
@@ -408,9 +418,17 @@ class SCEVMEngine:
         lex_task = asyncio.to_thread(do_lexical_search)
         struct_task = asyncio.to_thread(do_structural_search)
 
-        (sem_cands, sem_filtered_docs), lex_cands, (struct_cands, graph_context) = (
-            await asyncio.gather(sem_task, lex_task, struct_task)
-        )
+        if retrieval_depth == "lightweight":
+            # For lightweight, we might skip structural entirely and just do semantic
+            (sem_cands, sem_filtered_docs), lex_cands = await asyncio.gather(sem_task, lex_task)
+            struct_cands, graph_context = [], ""
+        elif use_project_memory:
+            (sem_cands, sem_filtered_docs), lex_cands, (struct_cands, graph_context) = (
+                await asyncio.gather(sem_task, lex_task, struct_task)
+            )
+        else:
+            (sem_cands, sem_filtered_docs) = await sem_task
+            lex_cands, struct_cands, graph_context = [], [], ""
 
         # Retrieval Fusion via RRF
         fusion_engine = RetrievalFusionEngine()

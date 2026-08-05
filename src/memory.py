@@ -213,10 +213,15 @@ class ManifestedHistory(list):
 
 
 class MemoryManager:
-    """Manages short-term (session) and long-term (persistent file) memory for the assistant."""
+    """Legacy singleton memory for daemon usage (Not used in the new MultiTenant Web API)."""
 
-    def __init__(self, memory_file_path: str = DEFAULT_MEMORY_PATH):
-        self.memory_file_path = memory_file_path
+    def __init__(self, memory_file_path: str | None = None, *, tenant_id: str = "development", owner_subject: str = "development"):
+        if memory_file_path is None or memory_file_path == DEFAULT_MEMORY_PATH:
+            safe_tenant = "".join(c if c.isalnum() else "_" for c in tenant_id)[:20]
+            safe_owner = "".join(c if c.isalnum() else "_" for c in owner_subject)[:40]
+            self.memory_file_path = os.path.expanduser(f"~/.ephemeral-engine/memory/{safe_tenant}/{safe_owner}/memory.json")
+        else:
+            self.memory_file_path = memory_file_path
         self.lock_file = f"{self.memory_file_path}.lock"
         self.short_term_history: list[dict[str, str]] = []
         self.long_term_data: dict[str, Any] = {
@@ -363,19 +368,29 @@ class SessionRecord:
         self.tenant_id: str = tenant_id
         self.owner_subject: str = owner_subject
         self.last_accessed: float = time.time()
-        self.chat_history: ManifestedHistory = ManifestedHistory(self.refresh_manifest)
-        self.state_manifest: StateManifest = StateManifest.from_history(
-            session_id, self.chat_history
+        self.chat_history: list[dict[str, str]] = []
+        
+        safe_tenant = "".join(c if c.isalnum() else "_" for c in self.tenant_id)[:20]
+        safe_session = "".join(c if c.isalnum() else "_" for c in self.session_id)[:40]
+        self.collection_name = f"t_{safe_tenant}_s_{safe_session}"
+        
+        self.chroma_client = chromadb.EphemeralClient()
+        from chromadb.utils import embedding_functions
+        try:
+            self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+                model_name=settings.CHROMA_EMBEDDING_MODEL
+            )
+        except (ImportError, ValueError, Exception):
+            self.embedding_fn = _get_shared_embedding_function()
+        self.collection: Collection = self.chroma_client.get_or_create_collection(
+            name=self.collection_name,
+            embedding_function=self.embedding_fn,
+            metadata={"hnsw:space": "cosine"},
         )
-
-        # Initialize isolated, memory-mapped storage engine
-        self.chroma_client = _get_shared_chroma_client()
-        self.embedding_fn = _get_shared_embedding_function()
-
+        
         from src.thresholds import get_engine
 
         engine = get_engine()
-        # perform startup calibration for this session/model if needed
         try:
             base_thresh = engine.calibrate_from_anchors(
                 embedding_model=settings.CHROMA_EMBEDDING_MODEL,
@@ -394,39 +409,19 @@ class SessionRecord:
             "development_phase": settings.DEVELOPMENT_PHASE,
             "token_budget": settings.SESSION_TOKEN_BUDGET,
         }
-
-        self.collection: Collection = self.chroma_client.get_or_create_collection(
-            name=f"session_{session_id}",
-            embedding_function=self.embedding_fn,
-            metadata={"hnsw:space": "cosine"},
-        )
+        
+        self.refresh_manifest()
         logger.info(
             f"Initialized volatile vector collection space for tenant session: {session_id}"
         )
-
-    def _calibrate_threshold(self) -> float | None:
-        """Deprecated. Use `AdaptiveThresholdEngine` calibration instead."""
-        from src.thresholds import get_engine
-
-        engine = get_engine()
-        try:
-            return engine.calibrate_from_anchors(
-                embedding_model=settings.CHROMA_EMBEDDING_MODEL,
-                repository=None,
-                session_id=self.session_id,
-                embedding_fn=self.embedding_fn,
-                positive_anchors=settings.RETRIEVAL_POSITIVE_ANCHORS,
-                negative_anchors=settings.RETRIEVAL_NEGATIVE_ANCHORS,
-            )
-        except Exception:
-            log_error("memory.session_record.dynamic_calibration", "calibration_failed")
-            return None
 
     def refresh_manifest(self) -> StateManifest:
         self.state_manifest = StateManifest.from_history(self.session_id, self.chat_history)
         return self.state_manifest
 
     def validate_manifest(self) -> bool:
+        if not hasattr(self, "state_manifest") or self.state_manifest is None:
+            self.refresh_manifest()
         return self.state_manifest.validate(self.chat_history)
 
 
@@ -602,7 +597,7 @@ class MultiTenantSessionRegistry:
                 session.chat_history.pop(0)
             session.refresh_manifest()
             # Log to immutable telemetry sink
-            log_interaction(session_id, role, content)
+            log_interaction(session_id, role, content, tenant_id=session.tenant_id, owner_subject=session.owner_subject)
 
     async def flush_session(
         self,
@@ -647,7 +642,7 @@ class MultiTenantSessionRegistry:
             vector_removed = session is None
             if session is not None:
                 try:
-                    session.chroma_client.delete_collection(f"session_{session_id}")
+                    session.chroma_client.delete_collection(session.collection.name)
                     vector_removed = True
                 except Exception as exc:
                     logger.warning(

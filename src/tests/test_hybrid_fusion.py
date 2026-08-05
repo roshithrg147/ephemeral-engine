@@ -12,7 +12,6 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from src.config import settings
 from src.services.ast_indexer import ASTIndexer
 from src.services.bm25_indexer import BM25Indexer
 from src.services.fusion_engine import RetrievalFusionEngine

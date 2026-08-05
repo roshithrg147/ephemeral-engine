@@ -6,15 +6,16 @@ importance, dependency resolution, and dynamic source token budgets in < 10 ms.
 from __future__ import annotations
 
 import time
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
-from src.services.context_budget_manager import SourceBudget
+from src.services.context_budget_manager import EvictionReason, EvictionRecord, SourceBudget
 from src.services.context_planner import ContextBlock
 
 
 class OptimizationResult(NamedTuple):
     admitted_blocks: list[ContextBlock]
     evicted_blocks: list[ContextBlock]
+    eviction_records: list[EvictionRecord]
     total_admitted_tokens: int
     total_evicted_tokens: int
     planner_latency_ms: float
@@ -32,11 +33,28 @@ class ContextOptimizer:
     ) -> OptimizationResult:
         start_time = time.perf_counter()
 
-        # Step 1: Filter out expired blocks
         now = time.time()
-        active_blocks = [
-            b for b in blocks if b.expiration is None or b.expiration > now
-        ]
+        active_blocks: list[ContextBlock] = []
+        evicted_blocks: list[ContextBlock] = []
+        eviction_records: list[EvictionRecord] = []
+        total_evicted_tokens = 0
+
+        # Step 1: Filter out expired blocks
+        for b in blocks:
+            if b.expiration is not None and b.expiration <= now:
+                evicted_blocks.append(b)
+                total_evicted_tokens += b.estimated_tokens
+                eviction_records.append(
+                    EvictionRecord(
+                        block_id=b.id,
+                        source=b.source,
+                        reason=EvictionReason.EXPIRED_TTL,
+                        rationale=f"Context block TTL expired at {b.expiration} (current time {now:.1f})",
+                        estimated_tokens=b.estimated_tokens,
+                    )
+                )
+            else:
+                active_blocks.append(b)
 
         # Index blocks by ID for dependency resolution
         block_map = {b.id: b for b in active_blocks}
@@ -48,14 +66,12 @@ class ContextOptimizer:
         sorted_blocks = sorted(active_blocks, key=block_rank, reverse=True)
 
         admitted_blocks: list[ContextBlock] = []
-        evicted_blocks: list[ContextBlock] = []
         admitted_ids: set[str] = set()
 
         tokens_by_source: dict[str, int] = {src: 0 for src in source_budgets}
         total_admitted_tokens = 0
-        total_evicted_tokens = 0
 
-        # Step 3: Greedy Knapsack Selection with Dependency Resolution
+        # Step 3: Greedy Knapsack Selection with Dependency Resolution & Policy Rules
         for block in sorted_blocks:
             if block.id in admitted_ids:
                 continue
@@ -78,29 +94,52 @@ class ContextOptimizer:
 
             # Check budget constraints
             can_admit = True
+            evict_reason = EvictionReason.TOTAL_BUDGET_EXHAUSTED
+            evict_rationale = ""
+
             if total_admitted_tokens + total_req_tokens > total_token_limit:
                 can_admit = False
+                evict_reason = EvictionReason.TOTAL_BUDGET_EXHAUSTED
+                evict_rationale = (
+                    f"Adding block ({total_req_tokens} tokens) exceeds total input limit "
+                    f"({total_admitted_tokens + total_req_tokens} > {total_token_limit})"
+                )
 
             if can_admit:
                 for src, req in req_tokens_by_source.items():
                     budget = source_budgets.get(src)
                     if budget:
                         current = tokens_by_source.get(src, 0)
-                        # Allow elasticity up to max_tokens for source if total limit permits
                         if current + req > budget.max_tokens:
                             can_admit = False
+                            evict_reason = EvictionReason.EXCEEDS_SOURCE_CEILING
+                            evict_rationale = (
+                                f"Adding block to source '{src}' ({current + req} tokens) "
+                                f"exceeds source ceiling ({budget.max_tokens} tokens)"
+                            )
                             break
 
             if can_admit:
                 for cand in all_candidate_blocks:
                     admitted_blocks.append(cand)
                     admitted_ids.add(cand.id)
-                    tokens_by_source[cand.source] = tokens_by_source.get(cand.source, 0) + cand.estimated_tokens
+                    tokens_by_source[cand.source] = (
+                        tokens_by_source.get(cand.source, 0) + cand.estimated_tokens
+                    )
                     total_admitted_tokens += cand.estimated_tokens
             else:
                 if block not in evicted_blocks:
                     evicted_blocks.append(block)
                     total_evicted_tokens += block.estimated_tokens
+                    eviction_records.append(
+                        EvictionRecord(
+                            block_id=block.id,
+                            source=block.source,
+                            reason=evict_reason,
+                            rationale=evict_rationale,
+                            estimated_tokens=block.estimated_tokens,
+                        )
+                    )
 
         # Restore original prompt order for admitted blocks
         order_map = {b.id: idx for idx, b in enumerate(blocks)}
@@ -111,6 +150,7 @@ class ContextOptimizer:
         return OptimizationResult(
             admitted_blocks=admitted_blocks,
             evicted_blocks=evicted_blocks,
+            eviction_records=eviction_records,
             total_admitted_tokens=total_admitted_tokens,
             total_evicted_tokens=total_evicted_tokens,
             planner_latency_ms=latency_ms,

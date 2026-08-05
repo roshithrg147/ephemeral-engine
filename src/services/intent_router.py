@@ -6,7 +6,6 @@ may invoke AST graph traversal.
 """
 from __future__ import annotations
 
-import re
 from typing import Literal
 
 IntentCategory = Literal[

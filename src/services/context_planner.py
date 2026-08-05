@@ -5,7 +5,6 @@ importance, retrieval scores, expiration timestamps, dependencies, and token est
 """
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -165,3 +164,66 @@ class ContextPlanner:
                 )
 
         return blocks
+
+    def govern_and_assemble(
+        self,
+        system_prompt: str,
+        history: list[dict[str, str]],
+        user_query: str,
+        semantic_memories: list[dict[str, Any]] | None = None,
+        lexical_items: list[dict[str, Any]] | None = None,
+        ast_symbols: list[dict[str, Any]] | None = None,
+        total_token_limit: int = 8192,
+        reserved_output_tokens: int = 2048,
+    ) -> tuple[str, list[ContextBlock], GovernanceReport]:
+        """Govern all context blocks through policy layer and assemble final prompt.
+
+        Returns (assembled_prompt, admitted_blocks, governance_report).
+        """
+        from src.services.context_budget_manager import ContextBudgetManager, GovernanceReport
+        from src.services.context_optimizer import ContextOptimizer
+
+        budget_mgr = ContextBudgetManager(
+            total_limit=total_token_limit,
+            reserved_output=reserved_output_tokens,
+        )
+
+        all_blocks = self.plan_context(
+            system_prompt=system_prompt,
+            history=history,
+            user_query=user_query,
+            semantic_memories=semantic_memories,
+            lexical_items=lexical_items,
+            ast_symbols=ast_symbols,
+        )
+
+        # Aggregate demanded tokens by source
+        demanded: dict[str, int] = {}
+        for b in all_blocks:
+            demanded[b.source] = demanded.get(b.source, 0) + b.estimated_tokens
+
+        source_budgets = budget_mgr.allocate_budgets(demanded)
+
+        opt_result = ContextOptimizer.optimize(
+            blocks=all_blocks,
+            source_budgets=source_budgets,
+            total_token_limit=budget_mgr.available_input_tokens,
+        )
+
+        report = GovernanceReport(
+            total_token_limit=total_token_limit,
+            available_input_tokens=budget_mgr.available_input_tokens,
+            admitted_block_count=len(opt_result.admitted_blocks),
+            admitted_total_tokens=opt_result.total_admitted_tokens,
+            evicted_block_count=len(opt_result.evicted_blocks),
+            evicted_total_tokens=opt_result.total_evicted_tokens,
+            eviction_records=opt_result.eviction_records,
+            tokens_by_source=opt_result.tokens_by_source,
+            policy_summary=(
+                f"Admitted {len(opt_result.admitted_blocks)} blocks ({opt_result.total_admitted_tokens} tokens); "
+                f"Evicted {len(opt_result.evicted_blocks)} blocks ({opt_result.total_evicted_tokens} tokens)"
+            ),
+        )
+
+        assembled_prompt = "\n\n".join(b.text for b in opt_result.admitted_blocks)
+        return assembled_prompt, opt_result.admitted_blocks, report

@@ -382,9 +382,9 @@ async def get_current_principal(
         # If no credentials provided, return default development principal
         if credentials is None or credentials.scheme.lower() != "bearer":
             return Principal(
-                subject="development",
-                tenant_id="development",
-                scopes=frozenset({settings.DIAGNOSTIC_SCOPE, settings.OPERATOR_SCOPE}),
+                subject="development-anonymous",
+                tenant_id="development-anonymous",
+                scopes=frozenset({settings.DIAGNOSTIC_SCOPE}),
             )
 
         token = credentials.credentials
@@ -397,8 +397,8 @@ async def get_current_principal(
 
             principal = Principal(
                 subject=f"dev-{meta.get('email')}",
-                tenant_id="development",
-                scopes=frozenset({settings.DIAGNOSTIC_SCOPE, settings.OPERATOR_SCOPE}),
+                tenant_id=f"dev-{meta.get('email')}",
+                scopes=frozenset({settings.DIAGNOSTIC_SCOPE}),
             )
             log_security_event(request, outcome="allowed", reason_code="authenticated", principal=principal)
             return principal
@@ -413,9 +413,9 @@ async def get_current_principal(
 
         # In development mode, fallback to development principal if token is unrecognized
         principal = Principal(
-            subject="development",
-            tenant_id="development",
-            scopes=frozenset({settings.DIAGNOSTIC_SCOPE, settings.OPERATOR_SCOPE}),
+            subject="development-fallback",
+            tenant_id="development-fallback",
+            scopes=frozenset({settings.DIAGNOSTIC_SCOPE}),
         )
         log_security_event(request, outcome="allowed", reason_code="authenticated_fallback", principal=principal)
         return principal

@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import ast
 import hashlib
-import json
-import os
 import re
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 
 class SymbolLocation(NamedTuple):
@@ -75,10 +73,14 @@ class ASTIndexer:
             extracted = self._parse_generic_code(rel_path, content)
 
         self._symbols[rel_path] = extracted
+        imports = [sym.symbol_name for sym in extracted if sym.symbol_type == "import"]
         for sym in extracted:
             self._symbol_map.setdefault(sym.symbol_name.lower(), []).append(sym)
-            if sym.symbol_name not in self._relationships:
-                self._relationships[sym.symbol_name] = []
+            rel_list = self._relationships.setdefault(sym.symbol_name, [])
+            if sym.symbol_type != "import":
+                for imp in imports:
+                    if imp not in rel_list:
+                        rel_list.append(imp)
 
         return extracted
 

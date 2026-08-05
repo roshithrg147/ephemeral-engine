@@ -7,6 +7,12 @@ import { AppShell } from './components/shell/AppShell';
 import { Overview } from './pages/Overview';
 import { Workspace } from './pages/Workspace';
 import { Sessions } from './pages/Sessions';
+import { RetrievalExplorer } from './pages/RetrievalExplorer';
+import { ContextGovernance } from './pages/ContextGovernance';
+import { RuntimeDashboard } from './pages/RuntimeDashboard';
+import { BenchmarksPage } from './pages/BenchmarksPage';
+import { DeveloperPage } from './pages/DeveloperPage';
+import { ReleasePage } from './pages/ReleasePage';
 
 function Router() {
   return (
@@ -14,6 +20,12 @@ function Router() {
       <Route path="/" component={Overview} />
       <Route path="/workspace" component={Workspace} />
       <Route path="/sessions" component={Sessions} />
+      <Route path="/retrieval" component={RetrievalExplorer} />
+      <Route path="/governance" component={ContextGovernance} />
+      <Route path="/runtime" component={RuntimeDashboard} />
+      <Route path="/benchmarks" component={BenchmarksPage} />
+      <Route path="/developer" component={DeveloperPage} />
+      <Route path="/release" component={ReleasePage} />
       <Route>
         <div className="flex items-center justify-center h-full text-text-tertiary">
           404 - Not Found

@@ -77,6 +77,7 @@ export interface SSEQueryHandlers {
   onRetrievedContext?: (data: string[]) => void;
   onResponseContent?: (data: string) => void;
   onAction?: (data: { type: string; payload: any }) => void;
+  onRoutingDecision?: (data: { mode: string; intent: string; confidence: number; reason: string; memory_config: any }) => void;
   onUsageReport?: (data: any[]) => void;
   onTokenUsage?: (data: { m1: number; m2: number }) => void;
   onIntent?: (data: string) => void;
@@ -216,6 +217,9 @@ export async function streamQuery(
               break;
             case 'action':
               handlers.onAction?.(parsedData);
+              break;
+            case 'routing_decision':
+              handlers.onRoutingDecision?.(parsedData);
               break;
             case 'usage_report':
               handlers.onUsageReport?.(parsedData);

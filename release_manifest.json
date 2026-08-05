@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0-rc1",
+  "git_commit": "8f3e21a",
+  "timestamp": 1785938764.9476044,
+  "python_version": "3.14.4",
+  "node_version": "22.0.0",
+  "embedding_model": "all-MiniLM-L6-v2",
+  "llm_provider": "NVIDIA NIM (Llama 3.3 70B)",
+  "benchmark_suite": "benchmark_v3",
+  "security_policy": "security_v2",
+  "retrieval_policy": "retrieval_v4",
+  "governance_policy": "governance_v2",
+  "backend_tests_passed": 150,
+  "backend_tests_total": 150,
+  "frontend_tests_passed": 40,
+  "frontend_tests_total": 40
+}

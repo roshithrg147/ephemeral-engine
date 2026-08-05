@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from src.main import app
 from src.security import protect_context_injection, protect_prompt_assembly, sanitize_user_input
-from src.services.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
+from src.services.circuit_breaker import CircuitBreaker
 from src.services.local_embedding_engine import ConfidenceEmbeddingRouter, LocalEmbeddingEngine
 from src.services.metrics import MetricsRegistry
 from src.services.retrieval_evaluator import RetrievalEvaluator

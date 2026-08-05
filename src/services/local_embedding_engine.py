@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 
 class EmbeddingResult(NamedTuple):

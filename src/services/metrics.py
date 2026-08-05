@@ -4,9 +4,6 @@ Exposes Prometheus counters, histograms, gauges, and OpenTelemetry trace helpers
 """
 from __future__ import annotations
 
-import time
-from typing import Any
-
 
 class Counter:
     def __init__(self, name: str, description: str):

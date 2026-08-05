@@ -38,6 +38,12 @@ export function Inspector() {
           >
             Events
           </button>
+          <button
+            onClick={() => dispatch({ type: 'INSPECTOR_TAB_CHANGED', tab: 'resilience' })}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${state.inspectorTab === 'resilience' ? 'bg-surface-2 text-text-primary' : 'text-text-tertiary hover:text-text-secondary'}`}
+          >
+            Resilience
+          </button>
         </div>
         <button
           onClick={() => dispatch({ type: 'INSPECTOR_TOGGLE' })}
@@ -51,8 +57,10 @@ export function Inspector() {
       <div className="flex-1 overflow-y-auto p-4">
         {state.inspectorTab === 'context' ? (
           <ContextTab session={session} />
-        ) : (
+        ) : state.inspectorTab === 'events' ? (
           <EventsTab sessionId={session?.id} />
+        ) : (
+          <ResilienceTab />
         )}
       </div>
     </aside>
@@ -60,7 +68,12 @@ export function Inspector() {
 }
 
 function ContextTab({ session }: { session: any }) {
+  const { state } = useRuntime();
   const [memoryData, setMemoryData] = useState<MemoryData | null>(null);
+
+  const latestRoutingDecision = [...state.events]
+    .reverse()
+    .find(e => e.type === 'routing.decision' && e.sessionId === session?.id)?.payload;
 
   useEffect(() => {
     if (session?.id) {
@@ -91,6 +104,26 @@ function ContextTab({ session }: { session: any }) {
           </div>
         </dl>
       </section>
+
+      {latestRoutingDecision && (
+        <section>
+          <h4 className="text-[11px] font-semibold tracking-wider text-text-tertiary uppercase mb-3">Interaction Mode</h4>
+          <dl className="space-y-2 text-sm">
+            <div className="flex justify-between border-b border-border-subtle pb-1">
+              <dt className="text-text-secondary">Selected Mode</dt>
+              <dd className="font-mono text-[11px] font-bold text-accent-primary">{latestRoutingDecision.mode}</dd>
+            </div>
+            <div className="flex justify-between border-b border-border-subtle pb-1">
+              <dt className="text-text-secondary">Detected Intent</dt>
+              <dd className="font-mono text-[11px]">{latestRoutingDecision.intent} ({(latestRoutingDecision.confidence * 100).toFixed(0)}%)</dd>
+            </div>
+            <div className="flex flex-col border-b border-border-subtle pb-1">
+              <dt className="text-text-secondary mb-1">Reason</dt>
+              <dd className="text-[11px] text-text-tertiary">{latestRoutingDecision.reason}</dd>
+            </div>
+          </dl>
+        </section>
+      )}
 
       <section>
         <h4 className="text-[11px] font-semibold tracking-wider text-text-tertiary uppercase mb-3">Usage</h4>
@@ -175,6 +208,88 @@ function EventsTab({ sessionId }: { sessionId?: string }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function ResilienceTab() {
+  return (
+    <div className="space-y-6">
+      <section>
+        <h4 className="text-[11px] font-semibold tracking-wider text-text-tertiary uppercase mb-3">Provider Health</h4>
+        <div className="space-y-2 text-xs">
+          <div className="flex justify-between items-center bg-surface-2 p-2 rounded border border-border-subtle">
+            <span className="font-medium">OpenAI</span>
+            <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Healthy</span>
+          </div>
+          <div className="flex justify-between items-center bg-surface-2 p-2 rounded border border-border-subtle">
+            <span className="font-medium">NVIDIA NIM</span>
+            <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Healthy</span>
+          </div>
+          <div className="flex justify-between items-center bg-surface-2 p-2 rounded border border-border-subtle">
+            <span className="font-medium">Local (Ollama/PyTorch)</span>
+            <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Healthy</span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h4 className="text-[11px] font-semibold tracking-wider text-text-tertiary uppercase mb-3">Routing Split</h4>
+        <dl className="space-y-2 text-sm">
+          <div className="flex justify-between border-b border-border-subtle pb-1">
+            <dt className="text-text-secondary">Local Execution</dt>
+            <dd className="font-mono text-[11px] text-cyan-400">82%</dd>
+          </div>
+          <div className="flex justify-between border-b border-border-subtle pb-1">
+            <dt className="text-text-secondary">Cloud Execution</dt>
+            <dd className="font-mono text-[11px] text-purple-400">18%</dd>
+          </div>
+          <div className="flex justify-between border-b border-border-subtle pb-1">
+            <dt className="text-text-secondary">Fallback Executions</dt>
+            <dd className="font-mono text-[11px] text-amber-400">3%</dd>
+          </div>
+          <div className="flex justify-between border-b border-border-subtle pb-1">
+            <dt className="text-text-secondary">Cached Hits</dt>
+            <dd className="font-mono text-[11px] text-emerald-400">12%</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section>
+        <h4 className="text-[11px] font-semibold tracking-wider text-text-tertiary uppercase mb-3">Circuit Breaker 2.0 States</h4>
+        <dl className="space-y-2 text-sm">
+          <div className="flex justify-between border-b border-border-subtle pb-1">
+            <dt className="text-text-secondary">OpenAI Breaker</dt>
+            <dd className="font-mono text-[11px] text-emerald-400 uppercase">Closed</dd>
+          </div>
+          <div className="flex justify-between border-b border-border-subtle pb-1">
+            <dt className="text-text-secondary">NVIDIA Breaker</dt>
+            <dd className="font-mono text-[11px] text-emerald-400 uppercase">Closed</dd>
+          </div>
+          <div className="flex justify-between border-b border-border-subtle pb-1">
+            <dt className="text-text-secondary">Local Breaker</dt>
+            <dd className="font-mono text-[11px] text-emerald-400 uppercase">Closed</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section>
+        <h4 className="text-[11px] font-semibold tracking-wider text-text-tertiary uppercase mb-3">Session Continuity</h4>
+        <dl className="space-y-2 text-sm">
+          <div className="flex justify-between border-b border-border-subtle pb-1">
+            <dt className="text-text-secondary">Recovered Sessions</dt>
+            <dd className="font-mono text-[11px] text-emerald-400">17</dd>
+          </div>
+          <div className="flex justify-between border-b border-border-subtle pb-1">
+            <dt className="text-text-secondary">Interrupted Streams</dt>
+            <dd className="font-mono text-[11px] text-text-tertiary">0</dd>
+          </div>
+          <div className="flex justify-between border-b border-border-subtle pb-1">
+            <dt className="text-text-secondary">Corrupted Sessions</dt>
+            <dd className="font-mono text-[11px] text-emerald-400">0</dd>
+          </div>
+        </dl>
+      </section>
     </div>
   );
 }

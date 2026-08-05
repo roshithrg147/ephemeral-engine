@@ -115,6 +115,18 @@ export function Composer() {
               delta: text,
             });
           },
+          onRoutingDecision: (decision) => {
+            const decisionEvent: EventEnvelope = {
+              id: Math.random().toString(36).substring(2),
+              seq: Date.now(),
+              type: 'routing.decision',
+              sessionId: activeSessionId,
+              timestamp: Date.now(),
+              payload: decision,
+              read: false,
+            };
+            dispatch({ type: 'EVENT_RECEIVED', event: decisionEvent });
+          },
           onAction: (action) => {
             if (action && action.type !== 'none') {
               const toolEvent: EventEnvelope = {

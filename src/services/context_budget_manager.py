@@ -5,7 +5,24 @@ reserved output token buffers, and elastic remaining token distribution.
 """
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, NamedTuple
+
+
+class EvictionReason(str, Enum):
+    EXCEEDS_SOURCE_CEILING = "EXCEEDS_SOURCE_CEILING"
+    TOTAL_BUDGET_EXHAUSTED = "TOTAL_BUDGET_EXHAUSTED"
+    EXPIRED_TTL = "EXPIRED_TTL"
+    UNRESOLVED_DEPENDENCY = "UNRESOLVED_DEPENDENCY"
+    LOW_IMPORTANCE_PRUNING = "LOW_IMPORTANCE_PRUNING"
+
+
+class EvictionRecord(NamedTuple):
+    block_id: str
+    source: str
+    reason: EvictionReason
+    rationale: str
+    estimated_tokens: int
 
 
 class SourceBudget(NamedTuple):
@@ -13,6 +30,18 @@ class SourceBudget(NamedTuple):
     min_tokens: int
     max_tokens: int
     allocated_tokens: int
+
+
+class GovernanceReport(NamedTuple):
+    total_token_limit: int
+    available_input_tokens: int
+    admitted_block_count: int
+    admitted_total_tokens: int
+    evicted_block_count: int
+    evicted_total_tokens: int
+    eviction_records: list[EvictionRecord]
+    tokens_by_source: dict[str, int]
+    policy_summary: str
 
 
 class ContextBudgetManager:

@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from src.main import app
 from src.services.context_budget_manager import ContextBudgetManager
 from src.services.context_optimizer import ContextOptimizer
-from src.services.context_planner import ContextBlock, ContextPlanner
+from src.services.context_planner import ContextPlanner
 from src.services.tokenizer_abstraction import FallbackCharTokenizer, TokenizerRegistry
 
 

@@ -1,7 +1,7 @@
 """Adaptive threshold engine for retrieval calibration.
 
-Provides per-(embedding_model, repository, session) rolling statistics,
-persistence, and decision APIs for admission/rejection of vector candidates.
+Canonical single source of truth for per-(embedding_model, repository, session) rolling statistics,
+anchor calibration, persistence, and acceptance threshold decisions for vector retrieval admission.
 """
 from __future__ import annotations
 
@@ -57,7 +57,6 @@ class AdaptiveThresholdEngine:
                 "mad": None,
                 "percentiles": {},
             }
-        pct = lambda p: statistics.quantiles(samples, n=100)[int(p) - 1] if len(samples) >= 100 else statistics.median(samples)
         mean = statistics.mean(samples)
         median = statistics.median(samples)
         stddev = statistics.pstdev(samples) if len(samples) > 1 else 0.0
@@ -93,8 +92,6 @@ class AdaptiveThresholdEngine:
         stats = self.get_stats(embedding_model, repository, session_id)
         mean = stats.get("mean")
         stddev = stats.get("stddev")
-        median = stats.get("median")
-        mad = stats.get("mad")
         score = None
         if mean is not None and stddev is not None and stddev > 0:
             # z-score in distance space: lower distance -> more similar

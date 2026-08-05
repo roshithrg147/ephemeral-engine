@@ -18,7 +18,7 @@ export type EventType =
   | 'connection.connected' | 'connection.reconnecting' | 'connection.lost' | 'connection.restored'
   | 'auth.expired' | 'auth.forbidden'
   | 'model.rate_limited' | 'model.retrying' | 'model.available'
-  | 'telemetry.snapshot'
+  | 'telemetry.snapshot' | 'routing.decision'
   | 'degradation.started' | 'degradation.resolved'
   | 'error.occurred';
 
@@ -102,7 +102,7 @@ export interface RuntimeState {
   
   inspectorOpen: boolean;
   sessionRailOpen?: boolean;
-  inspectorTab: 'context' | 'events';
+  inspectorTab: 'context' | 'events' | 'resilience';
   eventFilter: EventType | 'all';
   themeMode: 'dark' | 'light';
 }
@@ -132,7 +132,7 @@ export type RuntimeAction =
   | { type: 'COMPOSER_SUBMIT_SUCCEEDED' }
   | { type: 'INSPECTOR_TOGGLE' }
   | { type: 'SESSION_RAIL_TOGGLE' }
-  | { type: 'INSPECTOR_TAB_CHANGED'; tab: 'context' | 'events' }
+  | { type: 'INSPECTOR_TAB_CHANGED'; tab: 'context' | 'events' | 'resilience' }
   | { type: 'EVENT_FILTER_CHANGED'; filter: EventType | 'all' }
   | { type: 'PENDING_BURN_SET'; sessionId: string | null }
   | { type: 'THEME_TOGGLED' }
